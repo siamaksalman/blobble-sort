@@ -1,0 +1,231 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GODOT_VERSION: "4.7.2"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Godot
+        uses: chickensoft-games/setup-godot@f166999204a4f2722c6fe042fbaa3b3ea0d9c789 # v2
+        with:
+          version: ${{ env.GODOT_VERSION }}
+          use-dotnet: false
+          include-templates: false
+
+      # *.import files are gitignored, so a fresh checkout has to import every
+      # asset before scripts that preload textures/sounds can run. Caching
+      # .godot/imported makes that mostly a no-op on repeat runs.
+      - name: Cache Godot imports
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: .godot/imported
+          key: ${{ runner.os }}-godot-${{ env.GODOT_VERSION }}-imports-${{ hashFiles('project.godot', 'assets/**') }}
+          restore-keys: |
+            ${{ runner.os }}-godot-${{ env.GODOT_VERSION }}-imports-
+
+      - name: Import project
+        run: godot --headless --path . --import
+
+      - name: Level solvability
+        run: godot --headless --path . -s res://tests/test_levels.gd -- 1 200
+
+      - name: Scoring
+        run: godot --headless --path . -s res://tests/test_scoring.gd
+
+      - name: Playthrough
+        run: godot --headless --path . -s res://tests/test_playthrough.gd
+
+  export:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - preset: Web
+            dir: web
+            output: build/web/index.html
+          - preset: Linux
+            dir: linux
+            output: build/linux/FillerMachine.x86_64
+          - preset: Windows
+            dir: windows
+            output: build/windows/FillerMachine.exe
+          - preset: macOS
+            dir: macos
+            output: build/macos/FillerMachine.zip
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Godot
+        uses: chickensoft-games/setup-godot@f166999204a4f2722c6fe042fbaa3b3ea0d9c789 # v2
+        with:
+          version: ${{ env.GODOT_VERSION }}
+          use-dotnet: false
+          include-templates: true
+
+      - name: Cache Godot imports
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: .godot/imported
+          key: ${{ runner.os }}-godot-${{ env.GODOT_VERSION }}-imports-${{ hashFiles('project.godot', 'assets/**') }}
+          restore-keys: |
+            ${{ runner.os }}-godot-${{ env.GODOT_VERSION }}-imports-
+
+      - name: Export ${{ matrix.preset }}
+        run: |
+          godot --headless --path . --import
+          mkdir -p "build/${{ matrix.dir }}"
+          godot --headless --path . --export-release "${{ matrix.preset }}" "${{ matrix.output }}"
+          ls -la "build/${{ matrix.dir }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: filler-machine-${{ matrix.dir }}
+          path: build/${{ matrix.dir }}
+          if-no-files-found: error
+
+  android:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Godot
+        uses: chickensoft-games/setup-godot@f166999204a4f2722c6fe042fbaa3b3ea0d9c789 # v2
+        with:
+          version: ${{ env.GODOT_VERSION }}
+          use-dotnet: false
+          include-templates: true
+
+      - name: Cache Godot imports
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: .godot/imported
+          key: ${{ runner.os }}-godot-${{ env.GODOT_VERSION }}-imports-${{ hashFiles('project.godot', 'assets/**') }}
+          restore-keys: |
+            ${{ runner.os }}-godot-${{ env.GODOT_VERSION }}-imports-
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+        with:
+          # The preset doesn't use a Gradle build, so Godot only needs
+          # apksigner/zipalign from build-tools. v4.0.1's default "tools"
+          # package no longer exists and makes sdkmanager fail.
+          packages: platform-tools build-tools;35.0.0
+
+      - name: Point Godot at the Android SDK
+        run: |
+          mkdir -p ~/.config/godot
+          cat > ~/.config/godot/editor_settings-4.tres <<EOF
+          [gd_resource type="EditorSettings" format=3]
+
+          [resource]
+          export/android/android_sdk_path = "${ANDROID_HOME}"
+          export/android/java_sdk_path = "${JAVA_HOME}"
+          EOF
+
+      # Signs with the release keystore when the ANDROID_KEYSTORE_* secrets
+      # are configured; otherwise falls back to a throwaway debug keystore so
+      # PRs and forks still produce an installable APK.
+      - name: Prepare keystore
+        id: keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.keystore"
+            {
+              echo "GODOT_ANDROID_KEYSTORE_RELEASE_PATH=$RUNNER_TEMP/release.keystore"
+              echo "GODOT_ANDROID_KEYSTORE_RELEASE_USER=$KEY_ALIAS"
+              echo "GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD=$KEYSTORE_PASSWORD"
+            } >> "$GITHUB_ENV"
+            echo "mode=release" >> "$GITHUB_OUTPUT"
+          else
+            keytool -genkeypair -v -keystore "$RUNNER_TEMP/debug.keystore" \
+              -storepass android -keypass android -alias androiddebugkey \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+            {
+              echo "GODOT_ANDROID_KEYSTORE_DEBUG_PATH=$RUNNER_TEMP/debug.keystore"
+              echo "GODOT_ANDROID_KEYSTORE_DEBUG_USER=androiddebugkey"
+              echo "GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD=android"
+            } >> "$GITHUB_ENV"
+            echo "mode=debug" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Export Android APK
+        run: |
+          godot --headless --path . --import
+          mkdir -p build/android
+          godot --headless --path . --export-${{ steps.keystore.outputs.mode }} "Android" build/android/FillerMachine.apk
+          ls -la build/android
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: filler-machine-android
+          path: build/android/FillerMachine.apk
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [export, android]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Package
+        run: |
+          cd dist
+          mkdir -p ../release
+          (cd filler-machine-web && zip -qr ../../release/FillerMachine-web.zip .)
+          (cd filler-machine-linux && zip -qr ../../release/FillerMachine-linux.zip .)
+          (cd filler-machine-windows && zip -qr ../../release/FillerMachine-windows.zip .)
+          cp filler-machine-macos/FillerMachine.zip ../release/FillerMachine-macos.zip
+          cp filler-machine-android/FillerMachine.apk ../release/FillerMachine.apk
+          ls -la ../release
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        with:
+          generate_release_notes: true
+          files: release/*
