@@ -19,6 +19,7 @@ var moves_made := 0
 var shelves: Array[Rect2] = []
 
 var stream: Line2D
+var splash: CPUParticles2D
 var confetti: CPUParticles2D
 var level_label: Label
 var sub_label: Label
@@ -37,7 +38,34 @@ func _ready() -> void:
 	stream.begin_cap_mode = Line2D.LINE_CAP_ROUND
 	stream.end_cap_mode = Line2D.LINE_CAP_ROUND
 	stream.visible = false
+	stream.antialiased = true
+	var taper := Curve.new()
+	taper.add_point(Vector2(0, 1.0))
+	taper.add_point(Vector2(1, 0.65))
+	stream.width_curve = taper
 	add_child(stream)
+	splash = CPUParticles2D.new()
+	splash.z_index = 9
+	splash.emitting = false
+	splash.amount = 28
+	splash.lifetime = 0.35
+	splash.direction = Vector2(0, -1)
+	splash.spread = 55
+	splash.gravity = Vector2(0, 1400)
+	splash.initial_velocity_min = 140
+	splash.initial_velocity_max = 260
+	var drop := GradientTexture2D.new()
+	drop.width = 16
+	drop.height = 16
+	drop.fill = GradientTexture2D.FILL_RADIAL
+	drop.fill_from = Vector2(0.5, 0.5)
+	drop.fill_to = Vector2(1.0, 0.5)
+	drop.gradient = Gradient.new()
+	drop.gradient.set_color(0, Color.WHITE)
+	drop.gradient.set_color(1, Color(1, 1, 1, 0))
+	drop.gradient.set_offset(0, 0.55)
+	splash.texture = drop
+	add_child(splash)
 	_build_ui()
 	get_viewport().size_changed.connect(_layout)
 	start_level(level)
@@ -235,34 +263,87 @@ func _pour(i: int, j: int, amt: int) -> void:
 
 	var s := src.scale.x
 	var dir := 1.0 if dst.home_pos.x >= src.home_pos.x else -1.0
-	var ang := dir * deg_to_rad(70)
-	var mouth_target := dst.home_pos + dst.mouth_local() * dst.scale.x + Vector2(-dir * 6 * s, -18 * s)
-	var pour_pos := mouth_target - (src.mouth_local() * s).rotated(ang)
+	# Fuller bottles start pouring at a shallower angle and tip further as they empty.
+	var a_start := dir * _tilt_for(src_len, src.capacity)
+	var a_end := dir * _tilt_for(src_len - amt, src.capacity)
+	var mouth_target := dst.home_pos + dst.mouth_local() * dst.scale.x + Vector2(-dir * 4 * s, -24 * s)
+	var mouth_off := src.mouth_local() * s
+	var start_pos := src.position
+	var start_rot := src.rotation
+	var pour_pos := mouth_target - mouth_off.rotated(a_start)
+	var apex := (start_pos + pour_pos) * 0.5 + Vector2(0, -70 * s)
+	var pour_time := 0.3 + 0.12 * amt
 	src.z_index = 10
+	stream.default_color = color
+	stream.width = 10 * s
+	splash.color = color
+	splash.scale_amount_min = 0.35 * s
+	splash.scale_amount_max = 0.7 * s
 
 	var tw := create_tween()
-	tw.tween_property(src, "position", pour_pos, 0.24).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-	tw.parallel().tween_property(src, "rotation", ang, 0.24).set_trans(Tween.TRANS_SINE)
-	tw.tween_callback(func() -> void:
-		stream.default_color = color
-		stream.width = 9 * s
-		stream.visible = true)
+	# 1. Swing over on an arc while tilting to the starting angle.
 	tw.tween_method(func(t: float) -> void:
-		src.visual_level = src_len - amt * t
-		dst.visual_level = dst_len - amt + amt * t
-		stream.points = PackedVector2Array([
-			src.to_global(src.mouth_local()),
-			dst.to_global(dst.surface_local())]),
-		0.0, 1.0, 0.16 + 0.08 * amt)
+		var e := ease(t, -1.8)
+		src.position = _bezier(start_pos, apex, pour_pos, e)
+		src.rotation = lerpf(start_rot, a_start, e), 0.0, 1.0, 0.34)
+	# 2. Pour: keep the mouth pinned above the target while tipping further.
+	tw.tween_method(func(t: float) -> void:
+		var ang := lerpf(a_start, a_end, ease(t, -1.4))
+		src.rotation = ang
+		src.position = mouth_target - mouth_off.rotated(ang)
+		src.visual_level = src_len - amt * clampf(t / 0.88, 0.0, 1.0)
+		dst.visual_level = dst_len - amt + amt * clampf((t - 0.12) / 0.88, 0.0, 1.0)
+		_update_stream(src, dst, t, dir), 0.0, 1.0, pour_time)
 	tw.tween_callback(func() -> void:
 		stream.visible = false
-		src.set_layers(state[i]))
-	tw.tween_property(src, "position", src.home_pos, 0.22).set_trans(Tween.TRANS_SINE)
-	tw.parallel().tween_property(src, "rotation", 0.0, 0.22)
+		splash.emitting = false
+		src.set_layers(state[i])
+		_bump(dst))
+	# 3. Swing back home and settle with a little overshoot.
+	var end_pos := mouth_target - mouth_off.rotated(a_end)
+	var back_apex := (end_pos + src.home_pos) * 0.5 + Vector2(0, -50 * s)
+	tw.tween_method(func(t: float) -> void:
+		src.position = _bezier(end_pos, back_apex, src.home_pos, ease(t, -1.8)), 0.0, 1.0, 0.32)
+	tw.parallel().tween_property(src, "rotation", 0.0, 0.36).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	tw.tween_callback(func() -> void:
 		src.z_index = 0
+		src.position = src.home_pos
 		busy = false
 		_after_pour(j))
+
+
+func _tilt_for(level_units: float, cap: int) -> float:
+	return deg_to_rad(lerpf(86.0, 52.0, level_units / float(cap)))
+
+
+static func _bezier(a: Vector2, b: Vector2, c: Vector2, t: float) -> Vector2:
+	return a.lerp(b, t).lerp(b.lerp(c, t), t)
+
+
+## Stream grows from the mouth to the target surface, wobbles, then breaks off.
+func _update_stream(src: Bottle, dst: Bottle, t: float, dir: float) -> void:
+	var head := clampf(t / 0.14, 0.0, 1.0)
+	var tail := clampf((t - 0.86) / 0.14, 0.0, 1.0)
+	var p0 := src.to_global(src.mouth_local())
+	var p2 := dst.to_global(dst.surface_local())
+	var p1 := Vector2(p0.x + dir * 10 * src.scale.x, lerpf(p0.y, p2.y, 0.25))
+	var pts := PackedVector2Array()
+	var now := Time.get_ticks_msec() / 1000.0
+	for k in 13:
+		var f := lerpf(tail, head, k / 12.0)
+		var p := _bezier(p0, p1, p2, f)
+		p.x += sin(now * 28.0 + f * 9.0) * 1.6 * src.scale.x * f
+		pts.append(p)
+	stream.points = pts
+	stream.visible = head > tail
+	splash.position = p2
+	splash.emitting = head >= 1.0 and tail <= 0.0
+
+
+func _bump(b: Bottle) -> void:
+	var tw := create_tween()
+	tw.tween_property(b, "position", b.home_pos + Vector2(0, 4 * b.scale.y), 0.07)
+	tw.tween_property(b, "position", b.home_pos, 0.18).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 
 func _after_pour(j: int) -> void:

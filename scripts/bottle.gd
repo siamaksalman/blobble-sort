@@ -51,12 +51,12 @@ var cork_drop := 0.0:
 var _outline := PackedVector2Array()
 
 
-func _ready() -> void:
-	set_notify_transform(true)
+var _drawn_xform := Transform2D()
 
 
-func _notification(what: int) -> void:
-	if what == NOTIFICATION_TRANSFORM_CHANGED:
+func _process(_delta: float) -> void:
+	# Liquid shape and shadow depend on the tilt/position, so redraw when moved.
+	if transform != _drawn_xform:
 		queue_redraw()
 
 
@@ -131,9 +131,44 @@ static func _shade(base: Color, u: float) -> Color:
 	return c.lerp(Color.WHITE, spec)
 
 
-## y of the front (viewer-side) arc of a horizontal ellipse centered at y0.
-func _front_y(y0: float, u: float) -> float:
-	return y0 + DEPTH * sqrt(maxf(0.0, 1.0 - u * u))
+const DOME := SHOULDER * 0.8
+const AREA_COLUMNS := 24
+
+
+## Highest point liquid can reach at u (the shoulders form a dome).
+func _top_y(u: float) -> float:
+	return -INSET - DEPTH - capacity * SEG_H - DOME * (1.0 - u * u)
+
+
+## Local y of a world-level line (y = c + slope * x) at u, clamped to the
+## interior, pushed forward by the ellipse's front arc.
+func _surface_y(c: float, slope: float, u: float) -> float:
+	var r := W / 2 - INSET
+	var base_y := -INSET - DEPTH
+	var y := clampf(c + slope * u * r, _top_y(u), base_y)
+	return y + DEPTH * sqrt(maxf(0.0, 1.0 - u * u))
+
+
+## Find the level line holding `volume` units of liquid when tilted by `slope`.
+func _line_for_volume(volume: float, slope: float) -> float:
+	var r := W / 2 - INSET
+	var base_y := -INSET - DEPTH
+	var target := volume * SEG_H * 2.0 * r
+	var dx := 2.0 * r / AREA_COLUMNS
+	var lo := _top_y(0) - absf(slope) * r - 2.0 # line high -> lots of liquid
+	var hi := base_y + absf(slope) * r + 2.0 # line low -> none
+	for iter in 24:
+		var c := (lo + hi) * 0.5
+		var area := 0.0
+		for k in AREA_COLUMNS:
+			var u := -1.0 + (2.0 * k + 1.0) / AREA_COLUMNS
+			var y := c + slope * u * r
+			area += clampf(base_y - y, 0.0, base_y - _top_y(u)) * dx
+		if area > target:
+			lo = c
+		else:
+			hi = c
+	return (lo + hi) * 0.5
 
 
 func _ellipse(center: Vector2, rx: float, ry: float, segments := 28) -> PackedVector2Array:
@@ -147,6 +182,7 @@ func _ellipse(center: Vector2, rx: float, ry: float, segments := 28) -> PackedVe
 func _draw() -> void:
 	if _outline.is_empty():
 		_build_outline()
+	_drawn_xform = transform
 	var hw := W / 2
 
 	# Contact shadow, only while resting on the shelf.
@@ -168,31 +204,46 @@ func _draw() -> void:
 		back.append(Vector2(u * r, base_y - DEPTH * sqrt(maxf(0.0, 1.0 - u * u))))
 	draw_polyline(back, Color(1, 1, 1, 0.12), 2.0, true)
 
-	# Liquid: a cylinder of stacked layers, each shaded column by column.
+	# Liquid: layer boundaries stay level with the world even while the bottle
+	# tilts, so the liquid pools toward the mouth as it pours.
 	var top_level := minf(visual_level, layers.size())
-	for i in layers.size():
-		var lo := float(i)
-		var hi := minf(float(i + 1), top_level)
-		if hi <= lo:
-			break
+	var slope := -tan(clampf(rotation, -1.5, 1.5))
+	var n_layers := int(ceilf(top_level))
+	var lines := PackedFloat32Array([INF])
+	for i in range(1, n_layers + 1):
+		lines.append(_line_for_volume(minf(float(i), top_level), slope))
+	for i in n_layers:
 		var base := PALETTE[layers[i] % PALETTE.size()]
-		var y_lo := base_y - lo * SEG_H
-		var y_hi := base_y - hi * SEG_H
 		for k in COLUMNS:
 			var u0 := -1.0 + 2.0 * k / COLUMNS
 			var u1 := -1.0 + 2.0 * (k + 1) / COLUMNS
+			var lo0 := _surface_y(lines[i], slope, u0)
+			var lo1 := _surface_y(lines[i], slope, u1)
+			var hi0 := _surface_y(lines[i + 1], slope, u0)
+			var hi1 := _surface_y(lines[i + 1], slope, u1)
+			if lo0 - hi0 < 0.05 and lo1 - hi1 < 0.05:
+				continue
 			var c0 := _shade(base, u0)
 			var c1 := _shade(base, u1)
 			draw_polygon(PackedVector2Array([
-				Vector2(u0 * r, _front_y(y_hi, u0)), Vector2(u1 * r, _front_y(y_hi, u1)),
-				Vector2(u1 * r, _front_y(y_lo, u1)), Vector2(u0 * r, _front_y(y_lo, u0)),
+				Vector2(u0 * r, hi0), Vector2(u1 * r, hi1), Vector2(u1 * r, lo1), Vector2(u0 * r, lo0),
 			]), PackedColorArray([c0, c1, c1, c0]))
-	if top_level > 0.0:
-		var top_col := PALETTE[layers[int(ceilf(top_level)) - 1] % PALETTE.size()]
-		var yt := base_y - top_level * SEG_H
-		draw_colored_polygon(_ellipse(Vector2(0, yt), r, DEPTH), top_col.lightened(0.18))
-		draw_colored_polygon(_ellipse(Vector2(-r * 0.25, yt - DEPTH * 0.15), r * 0.45, DEPTH * 0.45),
-			Color(1, 1, 1, 0.18))
+	if n_layers > 0:
+		# Top surface: the line's front arc forward, back arc returning.
+		var top_col := PALETTE[layers[n_layers - 1] % PALETTE.size()].lightened(0.18)
+		var c_top := lines[n_layers]
+		var surf := PackedVector2Array()
+		for k in COLUMNS + 1:
+			var u := -1.0 + 2.0 * k / COLUMNS
+			surf.append(Vector2(u * r, _surface_y(c_top, slope, u)))
+		for k in range(COLUMNS - 1, 0, -1):
+			var u := -1.0 + 2.0 * k / COLUMNS
+			surf.append(Vector2(u * r, _surface_y(c_top, slope, u) - 2 * DEPTH * sqrt(1 - u * u)))
+		draw_colored_polygon(surf, top_col)
+		if absf(slope) < 0.05:
+			var yt := _surface_y(c_top, slope, 0) - DEPTH
+			draw_colored_polygon(_ellipse(Vector2(-r * 0.25, yt - DEPTH * 0.15), r * 0.45, DEPTH * 0.45),
+				Color(1, 1, 1, 0.18))
 
 	# Glass front: right-edge shade, left highlight streaks, shoulder glint.
 	draw_rect(Rect2(hw - 9, liquid_top() + 4, 5, -liquid_top() - 14), Color(0, 0, 0, 0.10))
