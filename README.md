@@ -1,4 +1,4 @@
-# Filler Time — Water Sort Puzzle (Godot 4.7)
+# Filler Machine — Water Sort Puzzle (Godot 4.7)
 
 Tap a bottle, then tap another to pour. Only matching colors stack; finish when every
 bottle holds a single color (finished bottles get a cork).
@@ -33,3 +33,15 @@ First install the export templates: Editor → Manage Export Templates → Downl
 - **Web:** `godot --headless --export-release "Web" build/web/index.html` (single-threaded, so it runs on any static host)
 - **Android:** set the Android SDK + debug keystore in Editor Settings → Export → Android
 - **iOS:** needs Xcode and your App Store Team ID in the iOS preset
+
+## Branding
+- **Splash:** Godot's boot splash shows `assets/splash.png` (RedCrow Studio). Then
+  `scenes/intro.tscn` makes the crow hop and fades into the game (tap to skip).
+- **Icons:** drawn with the game's own bottle renderer. To regenerate them all:
+  ```sh
+  godot --path . -s res://tools/render_icon.gd -- /tmp/icon_src   # 2048px renders
+  python3 tools/make_icons.py /tmp/icon_src                         # needs Pillow
+  ```
+  Output: `assets/icon.png` (project/web/Linux), `icon.icns` (macOS), `icon.ico` (Windows),
+  and `assets/icons/` (iOS 1024, Android legacy + adaptive + monochrome, PWA). All of these
+  are already wired into `export_presets.cfg`.
