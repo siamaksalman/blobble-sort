@@ -10,6 +10,9 @@ const NECK_W := 34.0
 const NECK_H := 20.0
 const LIP_H := 8.0
 const BOTTOM_R := 16.0
+## Half-height of the ellipses that fake a slightly-from-above 3D view.
+const DEPTH := 7.0
+const COLUMNS := 16
 
 const PALETTE: Array[Color] = [
 	Color("f2c521"), # yellow
@@ -48,6 +51,15 @@ var cork_drop := 0.0:
 var _outline := PackedVector2Array()
 
 
+func _ready() -> void:
+	set_notify_transform(true)
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_TRANSFORM_CHANGED:
+		queue_redraw()
+
+
 func set_layers(s: String) -> void:
 	layers.clear()
 	for i in s.length():
@@ -58,7 +70,7 @@ func set_layers(s: String) -> void:
 
 
 func liquid_top() -> float:
-	return -INSET - SEG_H * capacity
+	return -INSET - DEPTH * 2 - SEG_H * capacity
 
 
 func body_h() -> float:
@@ -74,7 +86,7 @@ func mouth_local() -> Vector2:
 
 
 func surface_local() -> Vector2:
-	return Vector2(0, -INSET - visual_level * SEG_H)
+	return Vector2(0, -INSET - DEPTH - visual_level * SEG_H)
 
 
 func hit_rect() -> Rect2:
@@ -110,60 +122,114 @@ func _build_outline() -> void:
 	_outline.reverse()
 
 
+## Shade of a cylinder surface at u in [-1, 1] (left..right), lit from front-left.
+static func _shade(base: Color, u: float) -> Color:
+	var nz := sqrt(maxf(0.0, 1.0 - u * u))
+	var d := clampf(-0.45 * u + 0.89 * nz, 0.0, 1.0)
+	var c := base.darkened(0.45).lerp(base.lightened(0.06), d)
+	var spec := exp(-pow((u + 0.48) / 0.13, 2.0)) * 0.38
+	return c.lerp(Color.WHITE, spec)
+
+
+## y of the front (viewer-side) arc of a horizontal ellipse centered at y0.
+func _front_y(y0: float, u: float) -> float:
+	return y0 + DEPTH * sqrt(maxf(0.0, 1.0 - u * u))
+
+
+func _ellipse(center: Vector2, rx: float, ry: float, segments := 28) -> PackedVector2Array:
+	var pts := PackedVector2Array()
+	for k in segments:
+		var a := TAU * k / segments
+		pts.append(center + Vector2(cos(a) * rx, sin(a) * ry))
+	return pts
+
+
 func _draw() -> void:
 	if _outline.is_empty():
 		_build_outline()
+	var hw := W / 2
 
-	# Glass back.
-	draw_colored_polygon(_outline, Color(1, 1, 1, 0.07))
+	# Contact shadow, only while resting on the shelf.
+	if position.distance_to(home_pos) < 1.0 and absf(rotation) < 0.01:
+		draw_colored_polygon(_ellipse(Vector2(3, 2), hw * 1.05, 7), Color(0, 0, 0, 0.22))
 
-	# Liquid, bottom -> top, clipped at visual_level.
-	var inner_w := W - INSET * 2
-	var x0 := -W / 2 + INSET
-	var y := -INSET
-	var top_color := Color.TRANSPARENT
+	# Glass back: brighter toward the rim edges, like thick curved glass.
+	var glass_cols := PackedColorArray()
+	for p in _outline:
+		var e := absf(p.x) / hw
+		glass_cols.append(Color(0.85, 0.95, 1.0, 0.04 + 0.13 * e * e))
+	draw_polygon(_outline, glass_cols)
+	# Back half of the inner base, seen through the glass.
+	var base_y := -INSET - DEPTH
+	var r := hw - INSET
+	var back := PackedVector2Array()
+	for k in 17:
+		var u := -1.0 + 2.0 * k / 16.0
+		back.append(Vector2(u * r, base_y - DEPTH * sqrt(maxf(0.0, 1.0 - u * u))))
+	draw_polyline(back, Color(1, 1, 1, 0.12), 2.0, true)
+
+	# Liquid: a cylinder of stacked layers, each shaded column by column.
+	var top_level := minf(visual_level, layers.size())
 	for i in layers.size():
-		var h := clampf(visual_level - i, 0.0, 1.0) * SEG_H
-		if h <= 0.0:
+		var lo := float(i)
+		var hi := minf(float(i + 1), top_level)
+		if hi <= lo:
 			break
-		var col := PALETTE[layers[i] % PALETTE.size()]
-		var rect := Rect2(x0, y - h, inner_w, h)
-		if i == 0:
-			var sb := StyleBoxFlat.new()
-			sb.bg_color = col
-			var r := int(minf(BOTTOM_R - INSET, h))
-			sb.corner_radius_bottom_left = r
-			sb.corner_radius_bottom_right = r
-			sb.anti_aliasing = true
-			draw_style_box(sb, rect)
-		else:
-			draw_rect(rect, col)
-		# soft shading for a rounded look
-		draw_rect(Rect2(x0 + inner_w * 0.72, y - h, inner_w * 0.28, h), Color(0, 0, 0, 0.13))
-		draw_rect(Rect2(x0 + inner_w * 0.1, y - h, inner_w * 0.14, h), Color(1, 1, 1, 0.12))
-		y -= h
-		top_color = col
-	if top_color.a > 0.0:
-		draw_rect(Rect2(x0, y, inner_w, 5), top_color.lightened(0.3))
+		var base := PALETTE[layers[i] % PALETTE.size()]
+		var y_lo := base_y - lo * SEG_H
+		var y_hi := base_y - hi * SEG_H
+		for k in COLUMNS:
+			var u0 := -1.0 + 2.0 * k / COLUMNS
+			var u1 := -1.0 + 2.0 * (k + 1) / COLUMNS
+			var c0 := _shade(base, u0)
+			var c1 := _shade(base, u1)
+			draw_polygon(PackedVector2Array([
+				Vector2(u0 * r, _front_y(y_hi, u0)), Vector2(u1 * r, _front_y(y_hi, u1)),
+				Vector2(u1 * r, _front_y(y_lo, u1)), Vector2(u0 * r, _front_y(y_lo, u0)),
+			]), PackedColorArray([c0, c1, c1, c0]))
+	if top_level > 0.0:
+		var top_col := PALETTE[layers[int(ceilf(top_level)) - 1] % PALETTE.size()]
+		var yt := base_y - top_level * SEG_H
+		draw_colored_polygon(_ellipse(Vector2(0, yt), r, DEPTH), top_col.lightened(0.18))
+		draw_colored_polygon(_ellipse(Vector2(-r * 0.25, yt - DEPTH * 0.15), r * 0.45, DEPTH * 0.45),
+			Color(1, 1, 1, 0.18))
 
-	# Glass highlight + outline.
+	# Glass front: right-edge shade, left highlight streaks, shoulder glint.
+	draw_rect(Rect2(hw - 9, liquid_top() + 4, 5, -liquid_top() - 14), Color(0, 0, 0, 0.10))
 	var hl := StyleBoxFlat.new()
-	hl.bg_color = Color(1, 1, 1, 0.22)
+	hl.bg_color = Color(1, 1, 1, 0.30)
 	hl.set_corner_radius_all(4)
-	draw_style_box(hl, Rect2(-W / 2 + 9, liquid_top() + 8, 7, SEG_H * capacity * 0.75))
+	hl.anti_aliasing = true
+	draw_style_box(hl, Rect2(-hw + 8, liquid_top() + 10, 7, SEG_H * capacity * 0.7))
+	hl.bg_color = Color(1, 1, 1, 0.14)
+	draw_style_box(hl, Rect2(-hw + 18, liquid_top() + 14, 3, SEG_H * capacity * 0.45))
+	draw_arc(Vector2(0, liquid_top() + 2), hw - 8, PI * 1.15, PI * 1.38, 8, Color(1, 1, 1, 0.3), 3.0, true)
+
 	var closed := _outline.duplicate()
 	closed.append(_outline[0])
 	if hint:
 		draw_polyline(closed, Color(1.0, 0.85, 0.2, 0.9), 9.0, true)
 	draw_polyline(closed, Color(0.78, 0.92, 1.0, 0.65), 3.0, true)
 
-	# Cork on finished bottles.
+	# Open mouth seen from slightly above.
+	var mouth := Vector2(0, -total_h())
+	draw_colored_polygon(_ellipse(mouth, NECK_W / 2 + 3, 4.5), Color(0.12, 0.14, 0.16, 0.55))
+	var rim := _ellipse(mouth, NECK_W / 2 + 3, 4.5)
+	rim.append(rim[0])
+	draw_polyline(rim, Color(0.85, 0.95, 1.0, 0.75), 2.5, true)
+
+	# Cork on finished bottles, drawn as a short cylinder.
 	if corked:
 		var cy := -total_h() - 12 - cork_drop
-		var cork := StyleBoxFlat.new()
-		cork.bg_color = Color("c98a4b")
-		cork.set_corner_radius_all(6)
-		cork.border_width_top = 5
-		cork.border_color = Color("e7ae6a")
-		cork.anti_aliasing = true
-		draw_style_box(cork, Rect2(-NECK_W / 2 - 3, cy, NECK_W + 6, 24))
+		var cw := NECK_W / 2 + 3
+		var cork := Color("c98a4b")
+		for k in COLUMNS:
+			var u0 := -1.0 + 2.0 * k / COLUMNS
+			var u1 := -1.0 + 2.0 * (k + 1) / COLUMNS
+			var c0 := _shade(cork, u0)
+			var c1 := _shade(cork, u1)
+			draw_polygon(PackedVector2Array([
+				Vector2(u0 * cw, cy + 4 * sqrt(1 - u0 * u0)), Vector2(u1 * cw, cy + 4 * sqrt(1 - u1 * u1)),
+				Vector2(u1 * cw, cy + 22 + 4 * sqrt(1 - u1 * u1)), Vector2(u0 * cw, cy + 22 + 4 * sqrt(1 - u0 * u0)),
+			]), PackedColorArray([c0, c1, c1, c0]))
+		draw_colored_polygon(_ellipse(Vector2(0, cy), cw, 4), Color("e7ae6a"))
