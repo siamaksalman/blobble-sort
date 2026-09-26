@@ -20,12 +20,33 @@ Infinite, procedurally generated, deterministic per level number
 Restart, Undo (Z), +Tube (one extra empty bottle per level), Hint (H; runs the solver
 from your current position). In debug builds, N skips a level.
 
+Each level has a stopwatch (starts on your first pour, pauses when the window loses focus)
+and a 1–3 star rating: 3 for finishing within the generator's solution length, 2 within
+1.5x, 1 otherwise; Hint or +Tube caps it at 2. Best stars and best time are saved per level.
+
 ## Tests
 ```sh
 godot --headless --path . -s res://tests/test_levels.gd -- 1 200   # every level solvable
+godot --headless --path . -s res://tests/test_scoring.gd           # star rating + time format
 godot --headless --path . -s res://tests/test_playthrough.gd       # tap-through + win flow
+godot --headless --path . -s res://tests/test_difficulty.gd -- 120 # difficulty ramp + tier rules (~30 s)
 godot --path . -s res://tests/screenshot.gd -- 30 shot.png          # render a level
 ```
+
+## Sound
+All sound effects are synthesized by `tools/make_sfx.py` (needs numpy) into `assets/sfx/`,
+and played by the `Sfx` autoload (`scripts/sfx.gd`). M or the speaker button mutes (saved).
+- **Pour:** a seamless water loop whose pitch rises as the target bottle fills, plus a
+  splash when the stream lands and a soft "tock" when the bottle is set back down.
+- **Bottles:** mellow tapped-glass tones for pick up / put down, a cork pop + rising chime
+  when a bottle is completed, and a falling double knock for invalid moves.
+- **Mobile practices:** 48 kHz mono, energy kept above ~300 Hz for phone speakers, short
+  UI sounds (80–300 ms), everything pitched in C major pentatonic so overlapping sounds
+  stay consonant (bottle taps step down the scale as the bottle fills), each clip loudness-normalized (BS.1770 momentary max, -16 to
+  -26 LUFS with gameplay above UI, -1 dBFS peak), random pitch/volume per play against
+  repetition fatigue, per-clip voice caps, separate SFX/UI buses and a limiter on Master.
+
+To tweak a sound, edit its function in `tools/make_sfx.py` and rerun it.
 
 ## Exporting (mobile / web / desktop)
 Presets for Web, Android, iOS, macOS, Windows and Linux are in `export_presets.cfg`.

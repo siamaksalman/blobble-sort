@@ -3,6 +3,7 @@ extends SceneTree
 ## Run: godot --headless --path . -s res://tests/test_playthrough.gd
 
 func _init() -> void:
+	await process_frame # let autoloads (Sfx) register before game.gd compiles
 	var game: Node = load("res://scenes/main.tscn").instantiate()
 	root.add_child(game)
 	await process_frame
@@ -18,6 +19,18 @@ func _init() -> void:
 	cfg.load("user://save.cfg")
 	var saved := int(cfg.get_value("progress", "level", 0))
 	print("win shown: %s, saved level: %d" % [game.win_layer.visible, saved])
+	# Playing the generated solution exactly hits the target: 3 stars, timer ran and stopped.
+	var best: Dictionary = game._load_best(3)
+	var t_won: float = game.elapsed
+	await create_timer(0.3).timeout
+	print("stars: %d, time: %.2f, best: %s" % [game.earned_stars, t_won, best])
+	ok = ok and game.earned_stars == 3 and t_won > 0 and game.elapsed == t_won
+	ok = ok and best.stars == 3 and best.time <= t_won
+	# Replay resets the board and timer and shows the saved best.
+	game.restart_level()
+	print("after replay: win %s, elapsed %.2f, best shown %s" % [
+		game.win_layer.visible, game.elapsed, game.best_box.visible])
+	ok = ok and not game.win_layer.visible and game.elapsed == 0.0 and game.best_box.visible
 	# Undo + hint smoke test on a fresh level
 	game.start_level(10)
 	game.show_hint()

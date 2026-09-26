@@ -6,6 +6,7 @@ extends SceneTree
 
 func _init() -> void:
 	var args := OS.get_cmdline_user_args()
+	await process_frame # let autoloads (Sfx) register before game.gd compiles
 	var game: Node = load("res://scenes/main.tscn").instantiate()
 	root.add_child(game)
 	await process_frame

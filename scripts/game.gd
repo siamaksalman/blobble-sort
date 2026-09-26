@@ -16,6 +16,11 @@ var selected := -1
 var busy := false
 var extra_used := false
 var moves_made := 0
+var target_moves := 0
+var hint_used := false
+var elapsed := 0.0
+var timer_running := false
+var window_focused := true
 var shelves: Array[Rect2] = []
 
 var stream: Line2D
@@ -27,8 +32,17 @@ var toast: Label
 var undo_btn: Button
 var add_btn: Button
 var hint_btn: Button
+var sound_btn: Button
 var win_layer: Control
 var win_title: Label
+var win_stars: Control
+var win_stats: Label
+var win_best: Label
+var best_box: Control
+var best_time_label: Label
+var best_stars := 0
+var earned_stars := 0
+var star_pop: Array[float] = [0.0, 0.0, 0.0]
 
 
 func _ready() -> void:
@@ -78,6 +92,7 @@ func start_level(n: int) -> void:
 	var data := LevelGenerator.generate(level)
 	capacity = data.capacity
 	initial_state = data.state.duplicate()
+	target_moves = data.solution.size()
 	_reset_board()
 
 
@@ -88,11 +103,20 @@ func restart_level() -> void:
 
 
 func _reset_board() -> void:
+	var best := _load_best(level)
+	best_box.visible = not best.is_empty()
+	if best_box.visible:
+		best_stars = best.stars
+		best_time_label.text = "Best " + Scoring.format_time(best.time)
+		best_box.queue_redraw()
 	state = initial_state.duplicate()
 	history.clear()
 	extra_used = false
 	selected = -1
 	moves_made = 0
+	hint_used = false
+	elapsed = 0.0
+	timer_running = false
 	busy = false
 	win_layer.hide()
 	_rebuild_bottles()
@@ -187,6 +211,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				restart_level()
 			KEY_H:
 				show_hint()
+			KEY_M:
+				_toggle_sound()
 			KEY_N:
 				if OS.is_debug_build():
 					start_level(level + 1)
@@ -209,6 +235,7 @@ func _on_tap(idx: int) -> void:
 			return
 		_select(idx)
 	elif selected == idx:
+		Sfx.play("deselect", Sfx.bottle_pitch(String(state[idx]).length(), capacity, 1))
 		_select(-1)
 	else:
 		var amt := WaterSolver.pour_amount(state, selected, idx, capacity)
@@ -227,12 +254,18 @@ func _select(idx: int) -> void:
 		create_tween().tween_property(old, "position", old.home_pos, 0.12)
 	selected = idx
 	if idx != -1:
+		Sfx.play("select", _bottle_pitch(idx))
 		var b := bottles[idx]
 		create_tween().tween_property(b, "position", b.home_pos - Vector2(0, LIFT * b.scale.y), 0.12) \
 			.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 
+func _bottle_pitch(idx: int) -> float:
+	return Sfx.bottle_pitch(String(state[idx]).length(), capacity)
+
+
 func _shake(idx: int) -> void:
+	Sfx.play("invalid")
 	var b := bottles[idx]
 	var p := b.position
 	var tw := create_tween()
@@ -255,6 +288,7 @@ func _pour(i: int, j: int, amt: int) -> void:
 	var dst_len: int = String(state[j]).length()
 	selected = -1
 	moves_made += 1
+	timer_running = true
 	_update_ui()
 
 	dst.set_layers(state[j])
@@ -293,7 +327,13 @@ func _pour(i: int, j: int, amt: int) -> void:
 		src.position = mouth_target - mouth_off.rotated(ang)
 		src.visual_level = src_len - amt * clampf(t / 0.88, 0.0, 1.0)
 		dst.visual_level = dst_len - amt + amt * clampf((t - 0.12) / 0.88, 0.0, 1.0)
+		Sfx.set_pour_fill(dst.visual_level / capacity)
 		_update_stream(src, dst, t, dir), 0.0, 1.0, pour_time)
+	# Sounds follow the stream: it starts, lands on the liquid, then breaks off.
+	tw.parallel().tween_callback(func() -> void: Sfx.start_pour(dst.visual_level / capacity))
+	tw.parallel().tween_callback(func() -> void:
+		Sfx.play("splash", lerpf(0.9, 1.3, float(dst_len - amt) / capacity))).set_delay(pour_time * 0.12)
+	tw.parallel().tween_callback(Sfx.stop_pour.bind(pour_time * 0.14)).set_delay(pour_time * 0.86)
 	tw.tween_callback(func() -> void:
 		stream.visible = false
 		splash.emitting = false
@@ -308,6 +348,7 @@ func _pour(i: int, j: int, amt: int) -> void:
 	tw.tween_callback(func() -> void:
 		src.z_index = 0
 		src.position = src.home_pos
+		Sfx.play("place", _bottle_pitch(i))
 		busy = false
 		_after_pour(j))
 
@@ -350,11 +391,28 @@ func _after_pour(j: int) -> void:
 	var dst := bottles[j]
 	dst.set_layers(state[j])
 	if dst.corked:
+		Sfx.play("cork")
 		dst.cork_drop = 60.0
 		create_tween().tween_property(dst, "cork_drop", 0.0, 0.35) \
 			.set_trans(Tween.TRANS_BOUNCE).set_ease(Tween.EASE_OUT)
 	if WaterSolver.is_solved(state, capacity):
 		_win()
+
+
+func _process(delta: float) -> void:
+	if not timer_running or not window_focused:
+		return
+	var shown := int(elapsed)
+	elapsed += delta
+	if int(elapsed) != shown:
+		_update_ui()
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT:
+		window_focused = false
+	elif what == NOTIFICATION_APPLICATION_FOCUS_IN:
+		window_focused = true
 
 
 # ---------------------------------------------------------------- actions
@@ -388,9 +446,12 @@ func show_hint() -> void:
 	var res := WaterSolver.solve(state, capacity, 30000)
 	if not res.solved or res.moves.is_empty():
 		_toast("Stuck! Try Undo or +Tube")
+		Sfx.play("invalid")
 		return
 	var m: Array = res.moves[0]
 	_select(-1)
+	Sfx.play("hint")
+	hint_used = true
 	bottles[m[0]].hint = true
 	bottles[m[1]].hint = true
 
@@ -401,15 +462,37 @@ func _clear_hint() -> void:
 
 
 func _win() -> void:
+	timer_running = false
 	_save(level + 1)
+	earned_stars = Scoring.stars(moves_made, target_moves, extra_used or hint_used)
+	var best := _load_best(level)
+	var new_best := not best.is_empty() and Scoring.is_better(earned_stars, elapsed, best)
+	_save_best(level, earned_stars, elapsed, best)
 	win_title.text = "Level %d Complete!" % level
+	win_stats.text = "Moves %d / %d    Time %s" % [moves_made, target_moves, Scoring.format_time(elapsed)]
+	win_best.visible = new_best
+	star_pop.fill(0.0)
+	win_stars.queue_redraw()
 	confetti.position = Vector2(get_viewport_rect().size.x / 2, get_viewport_rect().size.y * 0.45)
 	confetti.restart()
 	confetti.emitting = true
+	Sfx.play("win")
 	await get_tree().create_timer(0.6).timeout
 	win_layer.modulate.a = 0
 	win_layer.show()
 	create_tween().tween_property(win_layer, "modulate:a", 1.0, 0.25)
+	for k in earned_stars:
+		await get_tree().create_timer(0.22).timeout
+		if not win_layer.visible:
+			return
+		Sfx.play("place", Sfx.note([0, 4, 7, 12][mini(k, 3)])) # C E G arpeggio
+		create_tween().tween_method(_set_star_pop.bind(k), 0.0, 1.0, 0.35) \
+			.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+
+func _set_star_pop(v: float, k: int) -> void:
+	star_pop[k] = v
+	win_stars.queue_redraw()
 
 
 # ---------------------------------------------------------------- save
@@ -422,7 +505,27 @@ func _load() -> void:
 
 func _save(next_level: int) -> void:
 	var cfg := ConfigFile.new()
+	cfg.load(SAVE_PATH)
 	cfg.set_value("progress", "level", next_level)
+	cfg.save(SAVE_PATH)
+
+
+## Best result for a level as {stars, time}, or {} if it was never finished.
+func _load_best(n: int) -> Dictionary:
+	var cfg := ConfigFile.new()
+	var section := "level_%d" % n
+	if cfg.load(SAVE_PATH) != OK or not cfg.has_section(section):
+		return {}
+	return {stars = int(cfg.get_value(section, "stars", 0)), time = float(cfg.get_value(section, "time", 0.0))}
+
+
+## Best stars and best time are kept independently.
+func _save_best(n: int, stars: int, time: float, prev: Dictionary) -> void:
+	var cfg := ConfigFile.new()
+	cfg.load(SAVE_PATH)
+	var section := "level_%d" % n
+	cfg.set_value(section, "stars", maxi(stars, int(prev.get("stars", 0))))
+	cfg.set_value(section, "time", minf(time, float(prev.get("time", INF))))
 	cfg.save(SAVE_PATH)
 
 
@@ -430,7 +533,7 @@ func _save(next_level: int) -> void:
 
 func _update_ui() -> void:
 	level_label.text = "LEVEL %d" % level
-	sub_label.text = LevelGenerator.difficulty_name(level)
+	sub_label.text = "%s  ·  %s" % [LevelGenerator.difficulty_name(level), Scoring.format_time(elapsed)]
 	undo_btn.disabled = history.is_empty()
 	add_btn.disabled = extra_used
 
@@ -466,8 +569,58 @@ func _make_button(text: String, color: Color, cb: Callable) -> Button:
 		b.add_theme_stylebox_override(st, sb)
 	b.add_theme_color_override("font_color", Color.WHITE)
 	b.add_theme_color_override("font_disabled_color", Color(1, 1, 1, 0.4))
+	b.pressed.connect(func() -> void: Sfx.play("tap"))
 	b.pressed.connect(cb)
 	return b
+
+
+func _toggle_sound() -> void:
+	Sfx.toggle_mute()
+	Sfx.play("tap")
+	sound_btn.queue_redraw()
+
+
+func _draw_sound_icon() -> void:
+	var c := sound_btn.size / 2 + Vector2(-8, 0)
+	var col := Color(1, 1, 1, 0.9 if not Sfx.muted else 0.45)
+	var body := PackedVector2Array([
+		c + Vector2(-20, -9), c + Vector2(-10, -9), c + Vector2(4, -22),
+		c + Vector2(4, 22), c + Vector2(-10, 9), c + Vector2(-20, 9),
+	])
+	sound_btn.draw_colored_polygon(body, col)
+	if Sfx.muted:
+		sound_btn.draw_line(c + Vector2(13, -10), c + Vector2(31, 10), col, 5, true)
+		sound_btn.draw_line(c + Vector2(13, 10), c + Vector2(31, -10), col, 5, true)
+	else:
+		sound_btn.draw_arc(c + Vector2(4, 0), 12, -0.9, 0.9, 12, col, 4.5, true)
+		sound_btn.draw_arc(c + Vector2(4, 0), 23, -0.85, 0.85, 16, col, 4.5, true)
+
+
+## Five-pointed star drawn as a polygon so it needs no font glyphs.
+func _draw_star(ci: CanvasItem, c: Vector2, r: float, filled: bool) -> void:
+	var pts := PackedVector2Array()
+	for k in 10:
+		var a := -PI / 2 + k * PI / 5
+		pts.append(c + Vector2(cos(a), sin(a)) * (r if k % 2 == 0 else r * 0.45))
+	if filled:
+		ci.draw_colored_polygon(pts, Color("ffd65a"))
+	pts.append(pts[0])
+	ci.draw_polyline(pts, Color("ffd65a") if filled else Color(1, 1, 1, 0.3), maxf(r / 10, 2), true)
+
+
+func _draw_best_stars() -> void:
+	for k in 3:
+		_draw_star(best_box, Vector2(22 + k * 40, 22), 17, k < best_stars)
+
+
+func _draw_win_stars() -> void:
+	var mid := win_stars.size / 2
+	for k in 3:
+		var c := mid + Vector2((k - 1) * 110, 0 if k == 1 else 14)
+		var r := 46.0 if k == 1 else 38.0
+		_draw_star(win_stars, c, r, false)
+		if star_pop[k] > 0:
+			_draw_star(win_stars, c, r * star_pop[k], true)
 
 
 func _outlined_label(size: int, color: Color) -> Label:
@@ -498,6 +651,35 @@ func _build_ui() -> void:
 	header.add_child(level_label)
 	sub_label = _outlined_label(28, Color(0.72, 0.8, 0.84))
 	header.add_child(sub_label)
+
+	# Sound toggle, top-right. The speaker icon is drawn so it needs no font glyphs.
+	sound_btn = Button.new()
+	sound_btn.flat = true
+	sound_btn.focus_mode = Control.FOCUS_NONE
+	sound_btn.custom_minimum_size = Vector2(88, 88)
+	sound_btn.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	sound_btn.offset_left = -112
+	sound_btn.offset_right = -24
+	sound_btn.offset_top = 36
+	sound_btn.offset_bottom = 124
+	sound_btn.draw.connect(_draw_sound_icon)
+	sound_btn.pressed.connect(_toggle_sound)
+	root.add_child(sound_btn)
+
+	# Best result for this level, top-left.
+	best_box = Control.new()
+	best_box.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	best_box.offset_left = 28
+	best_box.offset_top = 44
+	best_box.custom_minimum_size = Vector2(124, 88)
+	best_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	best_box.draw.connect(_draw_best_stars)
+	best_box.hide()
+	root.add_child(best_box)
+	best_time_label = _outlined_label(24, Color(0.72, 0.8, 0.84))
+	best_time_label.position = Vector2(0, 46)
+	best_time_label.custom_minimum_size = Vector2(124, 0)
+	best_box.add_child(best_time_label)
 
 	toast = _outlined_label(30, Color(1, 0.9, 0.5))
 	toast.set_anchors_preset(Control.PRESET_TOP_WIDE)
@@ -567,7 +749,24 @@ func _build_ui() -> void:
 	panel.add_child(vb)
 	win_title = _outlined_label(46, Color("ffd65a"))
 	vb.add_child(win_title)
+	win_stars = Control.new()
+	win_stars.custom_minimum_size = Vector2(360, 110)
+	win_stars.draw.connect(_draw_win_stars)
+	vb.add_child(win_stars)
+	win_stats = _outlined_label(30, Color.WHITE)
+	vb.add_child(win_stats)
+	win_best = _outlined_label(30, Color("7fe08f"))
+	win_best.text = "New best!"
+	vb.add_child(win_best)
+	var btns := HBoxContainer.new()
+	btns.alignment = BoxContainer.ALIGNMENT_CENTER
+	btns.add_theme_constant_override("separation", 20)
+	vb.add_child(btns)
+	var replay_btn := _make_button("Replay", Color("5b6b78"), restart_level)
+	replay_btn.custom_minimum_size = Vector2(220, 100)
+	replay_btn.add_theme_font_size_override("font_size", 38)
+	btns.add_child(replay_btn)
 	var next_btn := _make_button("Next Level", Color("3fa55c"), func() -> void: start_level(level + 1))
-	next_btn.custom_minimum_size = Vector2(360, 100)
+	next_btn.custom_minimum_size = Vector2(300, 100)
 	next_btn.add_theme_font_size_override("font_size", 38)
-	vb.add_child(next_btn)
+	btns.add_child(next_btn)

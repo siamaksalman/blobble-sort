@@ -13,14 +13,17 @@ config_version=5
 config/name="Filler Machine"
 config/description="Water sort puzzle with procedurally generated, always-solvable levels."
 run/main_scene="res://scenes/intro.tscn"
+config/features=PackedStringArray("4.7", "GL Compatibility")
 boot_splash/bg_color=Color(0.996, 0.996, 0.996, 1)
 boot_splash/image="res://assets/splash.png"
-boot_splash/stretch_mode=1
-boot_splash/minimum_display_time=300
 config/icon="res://assets/icon.png"
 config/macos_native_icon="res://assets/icon.icns"
 config/windows_native_icon="res://assets/icon.ico"
-config/features=PackedStringArray("4.7", "GL Compatibility")
+boot_splash/minimum_display_time=300
+
+[autoload]
+
+Sfx="*res://scripts/sfx.gd"
 
 [display]
 
