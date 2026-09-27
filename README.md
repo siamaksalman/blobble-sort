@@ -61,6 +61,10 @@ The Android APK is debug-signed for testing. Store distribution needs your relea
 
 The downloaded web/desktop templates are in the ignored `.export-templates/` directory. Android uses the local Godot installation's template. On a different machine, install matching export templates and update/clear the custom template paths in `export_presets.cfg`. Override `GODOT` when needed, for example `make run GODOT=godot`.
 
+### Continuous integration
+
+`.github/workflows/build.yml` runs on every push to `main` and every pull request. It installs Godot 4.7.2 and the official export templates, runs `make test` and the rendered playtest (under Xvfb), then exports Web, Windows, Linux, macOS, and a debug-signed Android APK. Each build is downloadable from the run's **Artifacts**. Pushing a tag such as `v1.0.0` also publishes a GitHub release with the builds attached. The CI Android APK uses a throwaway debug key; release signing needs your own keystore as repository secrets.
+
 ## Verification
 
 ```sh

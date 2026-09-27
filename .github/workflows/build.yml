@@ -1,0 +1,110 @@
+name: Test and build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install numpy
+      - id: godot
+        uses: ./.github/actions/setup-godot
+      - name: Rules, saves, animation and sound tests
+        run: make test GODOT="${{ steps.godot.outputs.godot }}"
+      - name: Rendered playtest
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq xvfb libgl1-mesa-dri > /dev/null
+          mkdir -p builds
+          xvfb-run -a make playtest GODOT="${{ steps.godot.outputs.godot }}"
+
+  export:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { preset: Web, target: web, output: builds/web, artifact: blobble-web }
+          - { preset: Windows, target: windows, output: builds/desktop/Blobble.exe, artifact: blobble-windows }
+          - { preset: Linux, target: linux, output: builds/desktop/Blobble.x86_64, artifact: blobble-linux }
+          - { preset: macOS, target: macos, output: builds/desktop/Blobble-macOS.zip, artifact: blobble-macos }
+          - { preset: Android, target: android, output: builds/android/Blobble.apk, artifact: blobble-android }
+    steps:
+      - uses: actions/checkout@v4
+      - id: godot
+        uses: ./.github/actions/setup-godot
+        with:
+          templates: "true"
+
+      - name: Configure Android SDK and debug keystore
+        if: matrix.preset == 'Android'
+        run: |
+          set -euo pipefail
+          keytool -genkeypair -keystore "$RUNNER_TEMP/debug.keystore" -alias androiddebugkey \
+            -keyalg RSA -keysize 2048 -validity 10000 -storepass android -keypass android \
+            -dname "CN=Android Debug,O=Android,C=US" -noprompt
+          mkdir -p ~/.config/godot
+          cat > ~/.config/godot/editor_settings-4.7.tres <<EOF
+          [gd_resource type="EditorSettings" format=3]
+
+          [resource]
+          export/android/android_sdk_path = "$ANDROID_SDK_ROOT"
+          export/android/java_sdk_path = "$JAVA_HOME_17_X64"
+          export/android/debug_keystore = "$RUNNER_TEMP/debug.keystore"
+          export/android/debug_keystore_user = "androiddebugkey"
+          export/android/debug_keystore_pass = "android"
+          EOF
+
+      - name: Export ${{ matrix.preset }}
+        run: make ${{ matrix.target }} GODOT="${{ steps.godot.outputs.godot }}"
+
+      - name: Check export
+        run: |
+          test -e "${{ matrix.output }}"
+          ls -la "${{ matrix.output }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.output }}
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: export
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Package
+        run: |
+          set -euo pipefail
+          mkdir release
+          (cd artifacts/blobble-web && zip -qr ../../release/Blobble-web.zip .)
+          cp artifacts/blobble-windows/Blobble.exe release/
+          (cd artifacts/blobble-linux && chmod +x Blobble.x86_64 && zip -q ../../release/Blobble-Linux.zip Blobble.x86_64)
+          cp artifacts/blobble-macos/Blobble-macOS.zip release/
+          cp artifacts/blobble-android/Blobble.apk release/Blobble-debug.apk
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" release/* --repo "$GITHUB_REPOSITORY" --title "Blobble $GITHUB_REF_NAME" --generate-notes
