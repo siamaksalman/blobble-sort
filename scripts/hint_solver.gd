@@ -17,16 +17,24 @@ func get_hint(state: Array) -> Vector2i:
 	var key: String = Puzzle.state_key(state)
 	if known.has(key):
 		return known[key]
-	_visited.clear()
-	_remaining = 18000
-	var path: Array[Vector2i] = []
-	if _search(state.duplicate(true), 0, path, Vector2i(-1, -1)) and not path.is_empty():
+	var path: Array[Vector2i] = solve(state)
+	if not path.is_empty():
 		var walked: Array = state.duplicate(true)
 		for move: Vector2i in path:
 			known[Puzzle.state_key(walked)] = move
 			Puzzle.apply_to(walked, move.x, move.y)
 		return path[0]
 	return Vector2i(-1, -1)
+
+## A full route to completion within `budget` searched states, or empty if none was found.
+func solve(state: Array, budget: int = 18000) -> Array[Vector2i]:
+	_visited.clear()
+	_remaining = budget
+	var path: Array[Vector2i] = []
+	if _search(state.duplicate(true), 0, path, Vector2i(-1, -1)):
+		return path
+	path.clear()
+	return path
 
 func _search(state: Array, depth: int, path: Array[Vector2i], previous: Vector2i) -> bool:
 	if Puzzle.solved(state):

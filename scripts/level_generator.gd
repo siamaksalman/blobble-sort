@@ -1,96 +1,96 @@
 class_name BlobbleLevelGenerator
 extends RefCounted
-## Reverse legal pours from a solved board; every result carries a solution.
-## A color boundary needs at least one forward move to remove. This is a lower
-## bound, not a claim that the certificate is an optimal solution.
+## Deals every color across the pockets, then certifies the deal with a solver search,
+## so every level carries a verified solution. Early levels allow a few equal
+## neighbors to ease players in; later levels spread every blob apart.
 
 const Puzzle = preload("res://scripts/puzzle.gd")
 const Layout = preload("res://scripts/board_layout.gd")
-const VERSION: int = 1
+const Solver = preload("res://scripts/hint_solver.gd")
+const VERSION: int = 2
 const DEFAULT_SEED: int = 14921
-const MAX_BOUNDARIES: int = 20
+## Easing on the first levels: equal neighbors allowed, dropping by one every two levels.
+const OPENING_PAIRS: int = 4
+const MAX_PER_POCKET: int = 2
+const SEARCH_BUDGET: int = 4000
 const SOLVED: Array = [[0, 0, 0, 0], [2, 2, 2, 2], [1, 1, 1, 1], [5, 5, 5, 5],
 	[3, 3, 3, 3], [4, 4, 4, 4], [1, 1, 1, 1], [], [4, 4, 4, 4], [3, 3, 3, 3], [2, 2, 2, 2], []]
 
 func difficulty(index: int) -> Dictionary:
 	index = maxi(index, 0)
-	var colors: int = mini(6, 2 + index / 8)
-	var target: int = mini(MAX_BOUNDARIES, 1 + index / 2)
+	var allowed: int = maxi(0, OPENING_PAIRS - index / 2)
 	var names: Array[String] = ["Gentle", "Easy", "Thoughtful", "Tricky", "Expert"]
-	return {"colors": colors, "boundaries": target, "name": names[colors - 2]}
+	var tier: int = 0 if allowed >= 3 else 1 if allowed >= 1 else 2 if index < 20 else 3 if index < 40 else 4
+	return {"colors": 6, "pairs": allowed, "name": names[tier]}
 
 func generate(index: int, campaign_seed: int = DEFAULT_SEED) -> Dictionary:
 	index = maxi(index, 0)
 	var profile: Dictionary = difficulty(index)
-	var level: Dictionary = _scramble(profile, campaign_seed + (index % 1000000000) * 917)
-	if level.is_empty():
-		# Each of the twenty canonical profiles is covered by the certificate tests.
-		# This bounded fallback protects against an unusually unproductive random seed.
-		level = _scramble(profile, DEFAULT_SEED + (int(profile["boundaries"]) - 1) * 2 * 917)
-	assert(not level.is_empty(), "Canonical difficulty profile must have a certified scramble")
+	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	rng.seed = campaign_seed + (index % 1000000000) * 917
+	var level: Dictionary = {}
+	for attempt: int in 500:
+		level = _deal(profile, rng)
+		if not level.is_empty():
+			break
+	assert(not level.is_empty(), "A certified deal is found within the attempt budget")
 	level["difficulty"] = profile
 	level["index"] = index
 	level["generator_version"] = VERSION
 	level["layout"] = Layout.new().generate(index, campaign_seed)
 	return level
 
-func _scramble(profile: Dictionary, seed_value: int) -> Dictionary:
-	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
-	rng.seed = seed_value
-	for attempt: int in 64:
-		var state: Array = SOLVED.duplicate(true)
-		var reverse_moves: Array = []
-		var seen: Dictionary = {Puzzle.state_key(state): true}
-		var boundaries: int = 0
-		for step: int in 120:
-			var options: Array = []
-			var growing: Array = []
-			for source: int in state.size():
-				var pocket: Array = state[source]
-				if pocket.is_empty() or int(pocket.back()) >= int(profile["colors"]):
-					continue
-				var run: int = Puzzle.top_count(pocket)
-				for target: int in state.size():
-					var destination: Array = state[target]
-					if source == target or destination.size() == Puzzle.CAPACITY:
-						continue
-					var same: bool = not destination.is_empty() and destination.back() == pocket.back()
-					if same and pocket.size() < Puzzle.CAPACITY:
-						continue
-					for amount: int in range(1, mini(run, Puzzle.CAPACITY - destination.size()) + 1):
-						if amount == run and run < pocket.size():
-							continue
-						if destination.is_empty() and amount == pocket.size():
-							continue
-						var move: Array = [source, target, amount]
-						options.append(move)
-						if not destination.is_empty() and not same:
-							growing.append(move)
-			if options.is_empty():
-				break
-			var pool: Array = growing if not growing.is_empty() and rng.randf() < 0.8 else options
-			var move: Array = pool[rng.randi_range(0, pool.size() - 1)]
-			var before: Array = state.duplicate(true)
-			var source: int = move[0]
-			var target: int = move[1]
-			var added: int = 1 if not state[target].is_empty() and state[target].back() != state[source].back() else 0
-			for i: int in int(move[2]):
-				state[target].append(state[source].pop_back())
-			var key: String = Puzzle.state_key(state)
-			if seen.has(key):
-				state = before
-				continue
-			seen[key] = true
-			reverse_moves.append([target, source])
-			boundaries += added
-			if boundaries == int(profile["boundaries"]):
-				var active_colors: Dictionary = {}
-				for pocket: Array in state:
-					if not Puzzle.is_complete(pocket):
-						for color: int in pocket:
-							active_colors[color] = true
-				if active_colors.size() != int(profile["colors"]):
-					break
-				reverse_moves.reverse()
-				return {"pockets": state, "solution": reverse_moves}
-	return {}
+## One spread-out deal with exactly the allowed equal neighbors, if the solver can finish it.
+func _deal(profile: Dictionary, rng: RandomNumberGenerator) -> Dictionary:
+	var blobs: Array = []
+	var filled: Array[int] = []
+	for index: int in SOLVED.size():
+		blobs.append_array(SOLVED[index])
+		if not SOLVED[index].is_empty():
+			filled.append(index)
+	var state: Array = []
+	for attempt: int in 200:
+		_shuffle(blobs, rng)
+		state = []
+		for index: int in SOLVED.size():
+			state.append([])
+		for i: int in filled.size():
+			state[filled[i]] = blobs.slice(i * Puzzle.CAPACITY, (i + 1) * Puzzle.CAPACITY)
+		if _spread(state) and _pairs(state) == int(profile["pairs"]):
+			break
+		state = []
+	if state.is_empty():
+		return {}
+	var route: Array[Vector2i] = Solver.new().solve(state, SEARCH_BUDGET)
+	if route.is_empty():
+		return {}
+	var solution: Array = []
+	for move: Vector2i in route:
+		solution.append([move.x, move.y])
+	return {"pockets": state, "solution": solution}
+
+func _shuffle(items: Array, rng: RandomNumberGenerator) -> void:
+	# Seeded Fisher-Yates, so a campaign seed always reproduces the same deal.
+	for i: int in range(items.size() - 1, 0, -1):
+		var j: int = rng.randi_range(0, i)
+		var held: Variant = items[i]
+		items[i] = items[j]
+		items[j] = held
+
+## No pocket holds more than two of one color.
+func _spread(state: Array) -> bool:
+	for pocket: Array in state:
+		var counts: Dictionary = {}
+		for color: int in pocket:
+			counts[color] = int(counts.get(color, 0)) + 1
+			if counts[color] > MAX_PER_POCKET:
+				return false
+	return true
+
+func _pairs(state: Array) -> int:
+	var result: int = 0
+	for pocket: Array in state:
+		for i: int in range(1, pocket.size()):
+			if int(pocket[i]) == int(pocket[i - 1]):
+				result += 1
+	return result

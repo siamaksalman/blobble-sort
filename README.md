@@ -30,18 +30,19 @@ The renderer assembles open passages and closed walls from sections of the same 
 
 Geometry uses its own seeded random stream, so maze appearance does not alter puzzle difficulty or solutions. Existing saves retain their color arrangement and undo history; layout version 3 regenerates the maze automatically. Reopening the same level reproduces the same walls and openings.
 
-| Levels | Difficulty | Colors needing sorting | Color boundaries |
-| --- | --- | --- | --- |
-| 1–8 | Gentle | 2 | 1–4 |
-| 9–16 | Easy | 3 | 5–8 |
-| 17–24 | Thoughtful | 4 | 9–12 |
-| 25–32 | Tricky | 5 | 13–16 |
-| 33–38 | Expert | 6 | 17–19 |
-| 39 onward | Expert | 6 | 20 |
+Every level starts with all six colors dealt across the pockets. No pocket begins finished, and no pocket holds more than two of one color. Early levels are eased by allowing a few equal colors to sit directly on each other; that allowance shrinks until every blob starts apart.
 
-A boundary is a change of color between adjacent blobs in a pocket. A legal pour removes at most one boundary, so this is a lower bound on the required moves. The target increases every two levels; new active colors enter every eight. Actual boards must meet both requirements. This measures structural complexity, not exact optimal solution length or a promise that every individual puzzle feels harder. Difficulty caps at the twelve-pocket board's expert setting; later levels continue generating new arrangements at that setting.
+| Levels | Difficulty | Equal neighbors at the start |
+| --- | --- | --- |
+| 1–2 | Gentle | 4 |
+| 3–4 | Gentle | 3 |
+| 5–6 | Easy | 2 |
+| 7–8 | Easy | 1 |
+| 9–20 | Thoughtful | 0 |
+| 21–40 | Tricky | 0 |
+| 41 onward | Expert | 0 |
 
-Generation reverses legal pours from a solved board and retains the inverse moves as a solution certificate. A bounded retry process and tested canonical-seed fallback enforce each target. No network, pre-generated campaign, or expensive solver is required to create a level. The original JSON catalog is retained only to preserve in-progress saves from the previous version; subsequent levels use the generator. Save version 2 records the campaign seed and generator version.
+Generation deals the blobs with a seeded shuffle until the deal meets the level's spread rules, then certifies it with the hint solver's bounded search and keeps that route as the solution certificate. Deals the search cannot finish are discarded, so every level is known to be solvable. No network or pre-generated campaign is needed. The original JSON catalog is retained only to preserve in-progress saves from the first version. Saves record the campaign seed and generator version; generator version 2 (spread-out deals) replaces older in-progress boards with the new deal while keeping unlocked levels and records.
 
 ## Builds
 
@@ -83,7 +84,7 @@ Windows/Linux packages are cross-exported; running them requires their respectiv
 ## Implementation
 
 - `scripts/puzzle.gd`: independent rules, move validation, history, win detection.
-- `scripts/level_generator.gd`: deterministic runtime generation, certified solutions, and measured difficulty tiers.
+- `scripts/level_generator.gd`: deterministic spread-out deals, certified by the solver, with an easing allowance on early levels.
 - `scripts/board_layout.gd`: seeded connected maze graphs, opening variants, and reference-preserving pocket geometry.
 - `shaders/reference_board.gdshader`: assembles original clay sections into each maze and transforms the matching touch coordinates.
 - `shaders/jelly.gdshader`: samples the original jelly artwork, stretches body middles, and animates merge seams.
