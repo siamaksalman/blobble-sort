@@ -9,6 +9,7 @@ test:
 	"$(GODOT)" --headless --path . --script tests/test_puzzle.gd
 	"$(GODOT)" --headless --path . --script tests/test_save_store.gd
 	"$(GODOT)" --headless --path . --script tests/test_animation.gd
+	"$(GODOT)" --headless --path . --script tests/test_stack_interaction.gd
 	"$(GODOT)" --headless --path . --script tests/test_sound.gd
 	python3 tests/test_sound_harmony.py
 	"$(GODOT)" --headless --path . --script tests/test_level_generator.gd

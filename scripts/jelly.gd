@@ -14,6 +14,9 @@ var color_index: int = 0
 var selected: bool = false
 var origin: Vector2
 var layout_scale: float = 1.0
+## Board-space movement inherited from the supporting blobs underneath.
+var support_offset: float = 0.0
+var body_height: float = 104.0
 ## Animated deformation, multiplied with the selection scale each frame.
 var squash: Vector2 = Vector2.ONE
 var _age: float = 0.0
@@ -26,9 +29,10 @@ func configure(color: int, amount: int, show_symbols: bool = false) -> void:
 	color_index = color
 	count = amount
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	body_height = 104.0 + (count - 1) * 89.0
 	size = Vector2(140, 140 + (count - 1) * 89)
 	# Squash from the bottom of the body so jellies stay seated in their pocket.
-	pivot_offset = Vector2(size.x * 0.5, (size.y + 104.0 + (count - 1) * 89.0) * 0.5)
+	pivot_offset = Vector2(size.x * 0.5, (size.y + body_height) * 0.5)
 	var shader_material: ShaderMaterial = ShaderMaterial.new()
 	shader_material.shader = SHADER
 	shader_material.set_shader_parameter("jelly_color", COLORS[color])
@@ -37,7 +41,7 @@ func configure(color: int, amount: int, show_symbols: bool = false) -> void:
 	shader_material.set_shader_parameter("source_rect", Vector4(region.position.x, region.position.y, region.size.x, region.size.y))
 	shader_material.set_shader_parameter("single", count == 1)
 	shader_material.set_shader_parameter("rect_size", size)
-	shader_material.set_shader_parameter("body_height", 104.0 + (count - 1) * 89.0)
+	shader_material.set_shader_parameter("body_height", body_height)
 	_seed = randf() * 20.0
 	shader_material.set_shader_parameter("seed", _seed)
 	shader_material.set_shader_parameter("symbols", 1.0 if show_symbols else 0.0)
@@ -55,8 +59,12 @@ func _process(delta: float) -> void:
 	_apply_pose()
 
 func _apply_pose() -> void:
-	position = origin + Vector2(0, _lift * layout_scale)
+	position = origin + Vector2(0, support_offset + _lift * layout_scale)
 	scale = squash * _grow * layout_scale
+
+## The top surface moves with inherited support, lift, and bottom-pivot squash.
+func top_displacement() -> float:
+	return support_offset + _lift * layout_scale + body_height * (layout_scale - scale.y)
 
 func origin_for_center(center: Vector2) -> Vector2:
 	# Control scaling pivots at the body's bottom; compensate for the base scale
@@ -67,13 +75,20 @@ func set_selected(value: bool) -> void:
 	selected = value
 
 ## Springy impact: positive strength flattens, negative stretches upward.
-func wobble(strength: float, duration: float = 0.55) -> void:
+func wobble(strength: float, duration: float = 0.55, delay: float = 0.0) -> void:
 	if _wobble_tween:
 		_wobble_tween.kill()
+	_wobble_tween = create_tween()
+	if delay > 0.0:
+		_wobble_tween.tween_interval(delay)
+		_wobble_tween.tween_callback(_start_wobble.bind(strength))
+	else:
+		_start_wobble(strength)
+	_wobble_tween.tween_property(self, "squash", Vector2.ONE, duration).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
+
+func _start_wobble(strength: float) -> void:
 	squash = Vector2(1.0 + strength, 1.0 - strength)
 	_apply_pose()
-	_wobble_tween = create_tween()
-	_wobble_tween.tween_property(self, "squash", Vector2.ONE, duration).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
 
 ## Pinches the body at seam_y (relative to the jelly center), then lets the goo flow together.
 func fuse(seam_y: float) -> void:

@@ -29,6 +29,8 @@ var _reference_material: ShaderMaterial
 var _legacy_material: ShaderMaterial
 
 func _ready() -> void:
+	# Update contact after each jelly has applied its own animation pose.
+	process_priority = 10
 	size = Vector2(941, 1672)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_backdrop = TextureRect.new()
@@ -147,9 +149,7 @@ func play_pour(source: int, target: int, amount: int, after: Array) -> void:
 	for i: int in amount:
 		in_flight[target].pop_back()
 	refresh(in_flight)
-	var left_behind: BlobbleJelly = jelly_at(source, after[source].size() - 1)
-	if left_behind:
-		left_behind.wobble(-0.07, 0.4)
+	_pulse_supports(source, after[source].size(), -0.075)
 	flying = Jelly.new()
 	flying.configure(color, amount, show_symbols)
 	flying.z_index = 1
@@ -177,6 +177,7 @@ func play_pour(source: int, target: int, amount: int, after: Array) -> void:
 	refresh(after)
 	var landed: BlobbleJelly = jelly_at(target, after[target].size() - 1)
 	var merged: bool = landed.start_slot < below
+	_pulse_supports(target, landed.start_slot, minf(0.16, 0.095 * sqrt(float(amount))))
 	var impact: Vector2 = center_at(target, below - 0.5)
 	if merged:
 		var middle: float = landed.start_slot + (landed.count - 1) * 0.5
@@ -203,6 +204,7 @@ func splash_count() -> int:
 	return _droplets.size()
 
 func _process(delta: float) -> void:
+	_update_supports()
 	if _droplets.is_empty():
 		return
 	for droplet: Array in _droplets:
@@ -220,7 +222,37 @@ func _draw_droplets() -> void:
 		splash_layer.draw_circle(droplet[0], droplet[3] * (0.4 + 0.6 * life), tint)
 		splash_layer.draw_circle(droplet[0] + Vector2(-0.3, -0.3) * droplet[3], droplet[3] * 0.3 * life, Color(1, 1, 1, 0.5 * life))
 
+## A soft reaction travels downward; each supporting body receives less force.
+func _pulse_supports(pocket: int, below_slot: int, strength: float) -> void:
+	var depth: int = 0
+	for i: int in range(jellies.size() - 1, -1, -1):
+		var jelly: BlobbleJelly = jellies[i]
+		if jelly.pocket_index != pocket or jelly.start_slot >= below_slot:
+			continue
+		jelly.wobble(strength * pow(0.62, depth) / sqrt(float(jelly.count)), 0.52, depth * 0.045)
+		depth += 1
+
+func _update_supports() -> void:
+	var pocket: int = -1
+	var displacement: float = 0.0
+	# Refresh creates the bodies bottom-up, including merged groups.
+	for jelly: BlobbleJelly in jellies:
+		if jelly.pocket_index != pocket:
+			pocket = jelly.pocket_index
+			displacement = 0.0
+		jelly.support_offset = displacement
+		jelly._apply_pose()
+		displacement = jelly.top_displacement()
+
 func set_selection(index: int, destination: int = -1) -> void:
+	if index != selected:
+		for jelly: BlobbleJelly in jellies:
+			if jelly.pocket_index == selected and jelly.selected:
+				_pulse_supports(selected, jelly.start_slot, 0.04)
+		if index >= 0 and index < pockets.size() and not pockets[index].is_empty():
+			var top: BlobbleJelly = jelly_at(index, pockets[index].size() - 1)
+			if top:
+				_pulse_supports(index, top.start_slot, -0.055)
 	selected = index
 	hinted = destination
 	for jelly: BlobbleJelly in jellies:
