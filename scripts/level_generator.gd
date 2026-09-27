@@ -1,18 +1,19 @@
 class_name BlobbleLevelGenerator
 extends RefCounted
 ## Deals every color across the pockets, then certifies the deal with a solver search,
-## so every level carries a verified solution. Early levels are eased two ways: fewer
-## color groups spread thinly (lots of room to move), and a few equal neighbors.
+## so every level carries a verified solution. Introduce colors on small, roomy
+## boards before adding duplicate groups and crowding.
 
 const Puzzle = preload("res://scripts/puzzle.gd")
 const Layout = preload("res://scripts/board_layout.gd")
 const Solver = preload("res://scripts/hint_solver.gd")
-const VERSION: int = 3
+const VERSION: int = 4
 const DEFAULT_SEED: int = 14921
-## Easing on the first levels: equal neighbors allowed, dropping by one every two levels.
-const OPENING_PAIRS: int = 4
+## First teach two obvious matches, then gradually separate equal neighbors.
+const OPENING_PAIRS: Array[int] = [4, 2, 2, 2, 1, 1, 1]
 ## Color groups (four blobs each) on the first level, growing by one every three levels.
-const OPENING_GROUPS: int = 6
+const OPENING_GROUPS: int = 2
+const OPENING_MOVE_LIMIT: int = 5
 const MAX_PER_POCKET: int = 2
 const SEARCH_BUDGET: int = 4000
 const CANDIDATES: int = 4
@@ -23,10 +24,10 @@ const GROUP_COLORS: Array[int] = [0, 2, 1, 5, 3, 4, 1, 4, 3, 2]
 
 func difficulty(index: int) -> Dictionary:
 	index = maxi(index, 0)
-	var allowed: int = maxi(0, OPENING_PAIRS - index / 2)
+	var allowed: int = OPENING_PAIRS[index] if index < OPENING_PAIRS.size() else 0
 	var groups: int = mini(GROUP_COLORS.size(), OPENING_GROUPS + index / 3)
-	var target_score: int = 50 + mini(index, 12) * 11 + clampi(index - 12, 0, 38) * 2
-	return {"colors": 6, "groups": groups, "pairs": allowed, "target_score": target_score}
+	var target_score: int = 6 + mini(index, 12) * 6 + clampi(index - 12, 0, 12) * 10 + clampi(index - 24, 0, 30) * 2
+	return {"colors": mini(groups, Puzzle.COLOR_COUNT), "groups": groups, "pairs": allowed, "target_score": target_score}
 
 ## A deterministic estimate, not an optimal move count or a human difficulty rating.
 ## Count all legal destinations, including different colors, and discount spare room.
@@ -99,7 +100,9 @@ func _deal(profile: Dictionary, rng: RandomNumberGenerator) -> Dictionary:
 	for index: int in SOLVED.size():
 		if not SOLVED[index].is_empty():
 			filled.append(index)
-	# Spread the blobs as evenly as possible over the usual pockets, keeping two empty.
+	# Small introductions use two pockets per group; later boards occupy ten pockets.
+	filled.resize(mini(filled.size(), int(profile["groups"]) * 2))
+	# Spread the blobs evenly over the active pockets, keeping at least two empty.
 	var sizes: Array = []
 	for i: int in filled.size():
 		sizes.append(blobs.size() / filled.size() + (1 if i < blobs.size() % filled.size() else 0))
@@ -121,6 +124,9 @@ func _deal(profile: Dictionary, rng: RandomNumberGenerator) -> Dictionary:
 		return {}
 	var route: Array[Vector2i] = Solver.new().solve(state, SEARCH_BUDGET)
 	if route.is_empty():
+		return {}
+	# Keep the two-color introductions short even when the bounded solver takes a detour.
+	if int(profile["groups"]) == OPENING_GROUPS and route.size() > OPENING_MOVE_LIMIT:
 		return {}
 	var solution: Array = []
 	for move: Vector2i in route:

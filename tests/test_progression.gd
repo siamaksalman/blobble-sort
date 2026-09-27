@@ -49,7 +49,7 @@ func _initialize() -> void:
 	check(restored.saved_history.size() == 1 and Puzzle.state_key(restored.saved_history[0]) == Puzzle.state_key(puzzle.history[0]), "Generated undo history survives reload")
 	check(generator.generate(restored.level, restored.get("campaign_seed"))["pockets"] == puzzle.initial, "Restart after reload reproduces the exact initial puzzle")
 	var old_generated: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(PATH))
-	old_generated["generator_version"] = 2
+	old_generated["generator_version"] = 3
 	old_generated["best"] = {"3": 22}
 	_write(old_generated)
 	restored.read_save()

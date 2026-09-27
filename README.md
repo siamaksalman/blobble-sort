@@ -34,26 +34,30 @@ The renderer assembles open passages and closed walls from sections of the same 
 
 Geometry uses its own seeded random stream, so maze appearance does not alter puzzle difficulty or solutions. Existing saves retain their color arrangement and undo history; layout version 3 regenerates the maze automatically. Reopening the same level reproduces the same walls and openings.
 
-Every level starts with all six colors dealt across the pockets. No pocket begins finished, and no pocket holds more than two of one color. Early levels are eased two ways: the board holds fewer color groups (four blobs each), spread thinly so there is plenty of room to move, and a few equal colors may sit directly on each other. Both easings fade as levels advance.
+The opening introduces only two colors across four occupied pockets. Level 1 takes two obvious matching moves; levels 2–3 have certified solutions of at most five moves. A new color joins every three levels, with duplicate color groups and crowding introduced only after all six colors are familiar. No pocket begins finished, and no pocket holds more than two of one color. Empty pockets provide room to experiment throughout the introduction.
 
 | Levels | Color groups (blobs) | Equal neighbors at the start |
 | --- | --- | --- |
-| 1–2 | 6 (24) | 4 |
-| 3 | 6 (24) | 3 |
-| 4 | 7 (28) | 3 |
-| 5–6 | 7 (28) | 2 |
-| 7–8 | 8 (32) | 1 |
-| 9 | 8 (32) | 0 |
-| 10–12 | 9 (36) | 0 |
-| 13 onward | 10 (40) | 0 |
+| 1 | 2 (8) | 4 |
+| 2–3 | 2 (8) | 2 |
+| 4 | 3 (12) | 2 |
+| 5–6 | 3 (12) | 1 |
+| 7 | 4 (16) | 1 |
+| 8–9 | 4 (16) | 0 |
+| 10–12 | 5 (20) | 0 |
+| 13–15 | 6 (24) | 0 |
+| 16–18 | 7 (28) | 0 |
+| 19–21 | 8 (32) | 0 |
+| 22–24 | 9 (36) | 0 |
+| 25 onward | 10 (40) | 0 |
 
 Difficulty is estimated from the actual board and its certified solution. The score is `(excess color runs + solution moves) × (1 + occupied-slot fraction + blocked-move fraction)`, rounded to an integer. Excess runs count separate color groups beyond the number needed in the solved board. Mobility counts every legal source/destination pair under the current rules, including moves onto other colors; additional space therefore reduces the estimate. Solution length comes from a bounded search, not an optimal solution, so this is a reproducible heuristic rather than a measured human difficulty or minimum move count.
 
-Scores below 60 are Gentle, below 90 Easy, below 200 Thoughtful, below 240 Tricky, and otherwise Expert. The displayed label follows the selected board's score instead of its level number. The target rises from 50 on level 1 to 182 on level 13, then by two points per level until it caps at 258 on level 51. Actual scores can vary between neighboring levels.
+Scores below 60 are Gentle, below 90 Easy, below 200 Thoughtful, below 240 Tricky, and otherwise Expert. The displayed label follows the selected board's score instead of its level number. The target rises from 6 on level 1 to 78 on level 13, then by ten points per level to 198 on level 25, then by two points per level until it caps at 258 on level 55. Actual scores can vary between neighboring levels.
 
-Generation deals blobs with a seeded shuffle, certifies four candidates that meet the spread rules, and selects the candidate closest to the target score. The hint solver tries consolidation first but also searches temporary mixed-color stacks, allowing routes that require the new movement rules. Deals the bounded search cannot finish are discarded. Each selected level retains its verified solution certificate, and the same seed and level reproduce the same board and rating. No network or pre-generated campaign is needed.
+Generation deals blobs with a seeded shuffle, certifies four candidates that meet the spread rules, and selects the candidate closest to the target score. The hint solver tries consolidation first but also searches temporary mixed-color stacks, allowing routes that require the new movement rules. Deals the bounded search cannot finish are discarded, as are opening deals whose certified routes exceed five moves. Each selected level retains its verified solution certificate, and the same seed and level reproduce the same board and rating. No network or pre-generated campaign is needed.
 
-The original JSON catalog is retained only for in-progress saves from the first version. Saves record the campaign seed and generator version; generator version 3 (difficulty measured under unrestricted color moves) replaces older generated in-progress boards and undo histories while keeping unlocked levels, preferences, and records. Legacy catalog games remain playable.
+The original JSON catalog is retained only for in-progress saves from the first version. Saves record the campaign seed and generator version; generator version 4 (gradual color introduction and a gentler opening) replaces older generated in-progress boards and undo histories while keeping unlocked levels, preferences, and records. Legacy catalog games remain playable.
 
 ## Builds
 

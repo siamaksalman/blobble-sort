@@ -31,6 +31,10 @@ func _initialize() -> void:
 		_finish()
 		return
 	var generator: RefCounted = load("res://scripts/level_generator.gd").new()
+	_check_gentle_opening(generator)
+	if failures:
+		_finish()
+		return
 	check(generator.has_method("measure_difficulty"), "Difficulty is measured from a board under the current movement rules")
 	if not generator.has_method("measure_difficulty"):
 		_finish()
@@ -55,7 +59,7 @@ func _initialize() -> void:
 		var profile: Dictionary = generated["difficulty"]
 		var measured: Dictionary = generator.measure_difficulty(generated["pockets"], generated["solution"])
 		check(profile["score"] == measured["score"] and profile["name"] == measured["name"], "Displayed difficulty describes the actual generated board %d" % index)
-		check(profile["colors"] == 6, "Every color is in play from the first level (%d)" % (index + 1))
+		check(profile["colors"] == mini(6, 2 + index / 3), "One new color is introduced every three levels (%d)" % (index + 1))
 		check(profile["pairs"] <= previous_pairs, "Allowed equal neighbors never increase at level %d" % (index + 1))
 		previous_pairs = profile["pairs"]
 		check(profile["groups"] >= previous_groups, "Boards never get emptier as levels advance (%d)" % (index + 1))
@@ -66,10 +70,11 @@ func _initialize() -> void:
 	var first: Dictionary = generator.generate(0, 14921)
 	check(first["difficulty"]["pairs"] >= 2 and pairs(first["pockets"]) >= 2, "Early levels are eased by a few equal neighbors")
 	check(generator.generate(12, 14921)["difficulty"]["pairs"] == 0, "Later levels have no equal neighbors at all")
-	check(Puzzle.inventory(first["pockets"]) == [4, 4, 4, 4, 4, 4], "The first level has one group of each color, leaving plenty of room")
-	check(generator.generate(12, 14921)["difficulty"]["groups"] == 10, "The board is full by level 13")
+	check(first["difficulty"]["groups"] == 2, "The first level has only two groups to assemble")
+	check(generator.generate(12, 14921)["difficulty"]["groups"] == 6, "Level 13 introduces the sixth color before adding crowding")
+	check(generator.generate(24, 14921)["difficulty"]["groups"] == 10, "The board reaches full size at level 25")
 	check(_effort(generator, [0, 1, 2]) * 2 < _effort(generator, [30, 31, 32]), "Early levels are measurably easier with unrestricted color moves")
-	check(_effort(generator, [12, 13, 14]) < _effort(generator, [50, 51, 52]), "Measured difficulty continues growing after blob counts and equal neighbors stop changing")
+	check(_effort(generator, [24, 25, 26]) < _effort(generator, [50, 51, 52]), "Measured difficulty continues growing after blob counts and equal neighbors stop changing")
 	var variations: Dictionary = {}
 	for seed_value: int in [1, 2, 3, 17, 999, 54321]:
 		for index: int in [0, 8, 16, 24, 32, 39, 100, 9999]:
@@ -87,7 +92,8 @@ func _verify(generated: Dictionary, index: int) -> void:
 	var state: Array = generated["pockets"].duplicate(true)
 	check(Puzzle.valid_layout(state), "Generated board has twelve valid pockets at %d" % index)
 	var inventory: Array[int] = Puzzle.inventory(state)
-	check(inventory.all(func(count: int) -> bool: return count > 0 and count % Puzzle.CAPACITY == 0), "Every color is present in complete groups at %d" % index)
+	check(inventory.all(func(count: int) -> bool: return count % Puzzle.CAPACITY == 0), "Present colors come in complete groups at %d" % index)
+	check(inventory.filter(func(count: int) -> bool: return count > 0).size() == generated["difficulty"]["colors"], "Actual color count matches the difficulty profile at %d" % index)
 	check(inventory.reduce(func(total: int, count: int) -> int: return total + count, 0) == generated["difficulty"]["groups"] * Puzzle.CAPACITY, "Blob count matches the level's group count at %d" % index)
 	check(not Puzzle.solved(state), "Generated level starts unsolved at %d" % index)
 	check(pairs(state) == generated["difficulty"]["pairs"], "Equal neighbors match the level's allowance at %d" % index)
@@ -104,6 +110,26 @@ func _verify(generated: Dictionary, index: int) -> void:
 	solver.register_level(generated["pockets"], generated["solution"])
 	var hint: Vector2i = solver.get_hint(generated["pockets"])
 	check(Puzzle.transfer_size(generated["pockets"], hint.x, hint.y) > 0, "Generated certificate supports the hint system")
+
+## Beginner boards must be simple to read and complete, across campaign seeds.
+func _check_gentle_opening(generator: RefCounted) -> void:
+	for seed_value: int in [14921, 1, 17, 999, 54321]:
+		for index: int in 3:
+			var level: Dictionary = generator.generate(index, seed_value)
+			var inventory: Array[int] = Puzzle.inventory(level["pockets"])
+			check(inventory.filter(func(count: int) -> bool: return count > 0).size() == 2, "The first three levels teach sorting with only two colors")
+			check(level["pockets"].filter(func(pocket: Array) -> bool: return not pocket.is_empty()).size() == 4, "The opening keeps attention on just four occupied pockets")
+			check(level["solution"].size() <= (2 if index == 0 else 5), "Opening level %d has a short, approachable solution" % (index + 1))
+			if index == 0:
+				var state: Array = level["pockets"].duplicate(true)
+				for move: Array in level["solution"]:
+					check(not state[move[1]].is_empty() and state[move[0]].back() == state[move[1]].back(), "First-level moves visibly match the same color")
+					Puzzle.apply_to(state, move[0], move[1])
+	var previous: float = -1.0
+	for band: Array in [[0, 1, 2], [3, 4, 5], [6, 7, 8], [9, 10, 11], [12, 13, 14], [18, 19, 20], [24, 25, 26]]:
+		var effort: float = _effort(generator, band)
+		check(effort > previous, "Solving effort increases across each introduction and crowding stage")
+		previous = effort
 
 ## Average board difficulty under the current movement rules across a few campaigns.
 func _effort(generator: RefCounted, levels: Array) -> float:
