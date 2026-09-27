@@ -22,6 +22,8 @@ const assert = require('node:assert/strict');
   const initialSave = await readSave();
   assert.equal(initialSave?.generator_version, 1, 'Browser starts a procedural campaign');
   assert.equal(initialSave?.legacy_level, false, 'New games use generated levels');
+  assert.equal(initialSave?.layout?.version, 3, 'Browser uses procedural board geometry');
+  assert.equal(initialSave.layout.wells.length, 12, 'Generated layout includes every touch target');
   const state = initialSave.board;
   let source = -1, target = -1;
   for (let a = 0; a < state.length && source < 0; a++) {
@@ -39,10 +41,10 @@ const assert = require('node:assert/strict');
   const boardScale = Math.min((900 - 24) / 941, (virtualHeight - 390 * uiScale) / 1672);
   const boardX = (900 - 941 * boardScale) / 2;
   const boardY = 194 * uiScale;
-  const xs = [158, 369, 570, 782], ys = [478, 947, 1418];
-  function pocketPoint(index) {
-    return { x: (boardX + xs[index % 4] * boardScale) * scale,
-      y: (boardY + (ys[Math.floor(index / 4)] - 1.5 * 89) * boardScale) * scale };
+  function pocketPoint(index, layout = initialSave.layout) {
+    const center = layout.wells[index].center;
+    return { x: (boardX + center[0] * boardScale) * scale,
+      y: (boardY + center[1] * boardScale) * scale };
   }
   const before = await page.locator('canvas').screenshot();
   for (const index of [source, target]) {
@@ -85,10 +87,50 @@ const assert = require('node:assert/strict');
   await page.waitForTimeout(1200);
   await page.screenshot({ path: 'builds/web-mobile-restored.png' });
   assert.equal((await readSave())?.moves, 1, 'Reload preserves the move');
+  assert.deepEqual((await readSave()).layout, initialSave.layout, 'Reload preserves exact pocket geometry');
+  // Finish the introductory puzzle, then interact with the next physical layout.
+  function sortingMove(board) {
+    for (const allowEmpty of [false, true]) {
+      for (let a = 0; a < board.length; a++) {
+        if (!board[a].length || (board[a].length === 4 && new Set(board[a]).size === 1)) continue;
+        for (let b = 0; b < board.length; b++) {
+          if (a === b || board[b].length >= 4) continue;
+          if (board[b].length && board[b].at(-1) === board[a].at(-1)) return [a, b];
+          if (allowEmpty && !board[b].length && new Set(board[a]).size > 1) return [a, b];
+        }
+      }
+    }
+    return null;
+  }
+  async function touchMove(move, layout) {
+    assert.ok(move, 'A sorting move exists');
+    for (const index of move) {
+      const point = pocketPoint(index, layout);
+      await page.touchscreen.tap(point.x, point.y);
+      await page.waitForTimeout(650);
+    }
+    await page.waitForTimeout(1200);
+  }
+  let progress = await readSave();
+  for (let step = 0; step < 12 && progress.unlocked < 2; step++) {
+    await touchMove(sortingMove(progress.board), progress.layout);
+    progress = await readSave();
+  }
+  assert.equal(progress.unlocked, 2, 'Tutorial completion unlocks the next generated board');
+  const modalTop = (virtualHeight - 510 * uiScale) / 2;
+  await page.touchscreen.tap(195, (modalTop + 363.5 * uiScale) * scale);
+  await page.waitForTimeout(1800);
+  const secondLevel = await readSave();
+  assert.equal(secondLevel.level, 1, 'Next puzzle opens');
+  assert.notDeepEqual(secondLevel.layout.wells, initialSave.layout.wells, 'Next puzzle changes actual pocket placement');
+  assert.notDeepEqual(secondLevel.layout.corridors, initialSave.layout.corridors, 'Next puzzle changes maze connections');
+  await touchMove(sortingMove(secondLevel.board), secondLevel.layout);
+  assert.equal((await readSave()).moves, 1, 'Touch input works on the second generated layout');
+  await page.screenshot({ path: 'builds/web-mobile-layout-02.png' });
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.waitForTimeout(600);
   await page.screenshot({ path: 'builds/web-desktop-preview.png' });
   assert.equal(errors.length, 0, errors.join('\n'));
-  console.log('PASS: WebGL startup, mobile touch input, persisted move, reload restoration, desktop resize; no browser runtime errors.');
+  console.log('PASS: WebGL startup, touch input on two generated layouts, persisted geometry, reload, win/advance, desktop resize; no browser runtime errors.');
   await browser.close();
 })().catch(error => { console.error(error); process.exit(1); });

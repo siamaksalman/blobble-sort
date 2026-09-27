@@ -1,6 +1,6 @@
 # Blobble
 
-A complete Godot 4 color-sorting puzzle for touchscreens, browsers, and desktop. The cream clay maze is reconstructed from the supplied reference. The colored characters are independent animated shader pieces, with soft highlights, blinking eyes, merged bodies, and little completion marks.
+A Godot 4 color-sorting puzzle for touchscreens, browsers, and desktop. The cream clay board retains the reference-derived artwork, and the animated characters sample the original photo's jelly colors, highlights, and black eyes. Their movements, squash, and merging remain interactive.
 
 ## Play
 
@@ -23,6 +23,12 @@ The reference only defines an appearance, so the rules are an interpretation. Th
 ## Procedural progression
 
 Every level is generated on demand from the campaign seed and level number. Restarting or reopening a level reproduces the same puzzle. There is no thirty-level ending, and the level picker has pages for unlocked progress.
+
+Layouts preserve the reference's four-column, three-row proportions, broad sculpted channels, and full-size round jellies. The first board retains the original layout. Later levels generate a connected maze on the twelve pockets: a random spanning tree supplies eleven passages, then zero to four extra passages add loops. This changes which walls are open or closed and produces different branches, loops, and dead ends. Horizontal openings also vary between upper, middle, and lower positions.
+
+The renderer assembles open passages and closed walls from sections of the same clay artwork, preserving its grain, rounded edges, and lighting. Small seeded spacing changes and mirroring add variation. Maze passages remain decorative under the existing sorting rules; they do not restrict transfers to compatible pockets.
+
+Geometry uses its own seeded random stream, so maze appearance does not alter puzzle difficulty or solutions. Existing saves retain their color arrangement and undo history; layout version 3 regenerates the maze automatically. Reopening the same level reproduces the same walls and openings.
 
 | Levels | Difficulty | Colors needing sorting | Color boundaries |
 | --- | --- | --- | --- |
@@ -59,11 +65,12 @@ The downloaded web/desktop templates are in the ignored `.export-templates/` dir
 
 ```sh
 make import
-make test       # Rules, generated solvability/difficulty, undo, save/reload and migration, pour/merge animation
+make test       # Rules, solvability/difficulty, layout geometry, saves/migration, pour/merge animation, sound cues
 make playtest   # Real input, animation, hints, win/unlock, portrait/landscape captures
+make test-art   # Reference fidelity plus rendered open/closed maze gates
 ```
 
-`tests/web_playtest.cjs` runs a Chromium mobile/desktop test using Playwright. It checks WebGL startup, real touch input, persisted game data in IndexedDB, reload, and resizing. Set `PLAYWRIGHT_MODULE` and `CHROMIUM_PATH` if using an existing installation. Run `make serve` first.
+`tests/web_playtest.cjs` runs a Chromium mobile/desktop test using Playwright. It checks WebGL startup, real touch input on two different layouts, persisted game data and geometry in IndexedDB, reload, level completion, and resizing. Set `PLAYWRIGHT_MODULE` and `CHROMIUM_PATH` if using an existing installation. Run `make serve` first.
 
 Development follows the red → green → refactor cycle in [AGENTS.md](AGENTS.md). New behavior and bug fixes start with a failing test. The save regression suite uses a disposable file under `tests/.tmp/`; it never modifies player progress. Tests added to the original implementation were retrospective; subsequent fixes follow TDD.
 
@@ -73,10 +80,16 @@ Windows/Linux packages are cross-exported; running them requires their respectiv
 
 - `scripts/puzzle.gd`: independent rules, move validation, history, win detection.
 - `scripts/level_generator.gd`: deterministic runtime generation, certified solutions, and measured difficulty tiers.
+- `scripts/board_layout.gd`: seeded connected maze graphs, opening variants, and reference-preserving pocket geometry.
+- `shaders/reference_board.gdshader`: assembles original clay sections into each maze and transforms the matching touch coordinates.
+- `shaders/jelly.gdshader`: samples the original jelly artwork, stretches body middles, and animates merge seams.
 - `scripts/hint_solver.gd`: generated solution paths plus a bounded search for deviations. If no solution is found within the search budget, suggests undoing a move.
 - `scripts/board.gd`, `scripts/jelly.gd`, `shaders/`: board layout and animated pieces.
-- `scripts/game.gd`: responsive interface, input, sound, transitions, level selection.
+- `scripts/game.gd`: responsive interface, input, transitions, level selection.
+- `scripts/sound_bank.gd`: pooled playback of the eleven sound cues with gentle pitch variation.
 - `scripts/save_store.gd`: validated versioned saves with atomic replacement.
 - `tools/generate_content.py`: regenerates original synthesized sound effects. The legacy level data is kept immutable for save compatibility.
 
-No plug-ins, paid SDKs, analytics, ads, or runtime network calls. See [ASSETS.md](ASSETS.md) for font licensing and the generated board's provenance and exact prompt.
+No plug-ins, paid SDKs, analytics, ads, or runtime network calls. See [ASSETS.md](ASSETS.md) for font licensing and artwork provenance. `builds/reference-design.png` is a rendered art fixture arranged similarly to the photo; the playable campaign retains its generated puzzles. The game is not a pixel-for-pixel reproduction of every character position in the photograph.
+
+Open `builds/maze-variants.html` for a side-by-side comparison with a show/hide-jellies toggle. `builds/maze-empty-02.png` through `maze-empty-05.png` show four maze structures without pieces. Matching `maze-art-*.png` images use one shared puzzle arrangement to compare the artwork.

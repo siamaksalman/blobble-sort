@@ -25,8 +25,7 @@ var splash_layer: Control
 var _droplets: Array = []  # [position, velocity, color, radius, age, lifetime]
 var layout_data: Dictionary = {}
 var _backdrop: TextureRect
-var _clay_viewport: SubViewport
-var _clay_material: ShaderMaterial
+var _reference_material: ShaderMaterial
 var _legacy_material: ShaderMaterial
 
 func _ready() -> void:
@@ -41,19 +40,8 @@ func _ready() -> void:
 	_backdrop.size = size
 	_backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_backdrop)
-	_clay_viewport = SubViewport.new()
-	_clay_viewport.size = Vector2i(941, 1672)
-	_clay_viewport.disable_3d = true
-	_clay_viewport.transparent_bg = true
-	_clay_viewport.gui_disable_input = true
-	_clay_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
-	add_child(_clay_viewport)
-	var clay: ColorRect = ColorRect.new()
-	clay.size = size
-	_clay_material = ShaderMaterial.new()
-	_clay_material.shader = preload("res://shaders/clay_board.gdshader")
-	clay.material = _clay_material
-	_clay_viewport.add_child(clay)
+	_reference_material = ShaderMaterial.new()
+	_reference_material.shader = preload("res://shaders/reference_board.gdshader")
 	pieces = Control.new()
 	pieces.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(pieces)
@@ -83,32 +71,15 @@ func apply_layout(layout: Dictionary) -> void:
 		_backdrop.texture = TEXTURE
 		_backdrop.material = _legacy_material
 		return
-	var wells: PackedVector4Array = []
-	var radii: PackedFloat32Array = []
-	for i: int in 12:
-		var top: Vector2 = center_at(i, 3)
-		var bottom: Vector2 = center_at(i, 0)
-		wells.append(Vector4(top.x, top.y, bottom.x, bottom.y))
-		radii.append(71.0 * pocket_scale(i))
-	var corridors: PackedVector4Array = []
-	var widths: PackedFloat32Array = []
-	corridors.resize(Layout.MAX_CORRIDORS)
-	widths.resize(Layout.MAX_CORRIDORS)
-	for i: int in layout_data["corridors"].size():
-		var edge: Dictionary = layout_data["corridors"][i]
-		corridors[i] = Vector4(edge["start"][0], edge["start"][1], edge["end"][0], edge["end"][1])
-		widths[i] = edge["radius"]
-	_clay_material.set_shader_parameter("wells", wells)
-	_clay_material.set_shader_parameter("well_radii", radii)
-	_clay_material.set_shader_parameter("corridors", corridors)
-	_clay_material.set_shader_parameter("corridor_radii", widths)
-	_clay_material.set_shader_parameter("corridor_count", layout_data["corridors"].size())
-	_clay_material.set_shader_parameter("corner", layout_data["corner"])
-	_clay_material.set_shader_parameter("wave", layout_data["wave"])
-	_backdrop.material = null
-	_backdrop.texture = _clay_viewport.get_texture()
-	# The expensive clay lighting is drawn once per level, not every game frame.
-	_clay_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
+	_backdrop.texture = TEXTURE
+	_backdrop.material = _reference_material
+	_reference_material.set_shader_parameter("clay_art", TEXTURE)
+	for key: String in ["source_x", "target_x", "source_y", "target_y"]:
+		_reference_material.set_shader_parameter(key, PackedFloat32Array(layout_data[key]))
+	_reference_material.set_shader_parameter("mirror", layout_data["mirror"])
+	_reference_material.set_shader_parameter("reference_layout", layout_data["reference"])
+	_reference_material.set_shader_parameter("horizontal", PackedInt32Array(layout_data["horizontal"]))
+	_reference_material.set_shader_parameter("vertical", PackedInt32Array(layout_data["vertical"]))
 	queue_redraw()
 
 func directional_neighbor(index: int, direction: Vector2) -> int:
@@ -151,11 +122,9 @@ func refresh(state: Array, animate: bool = false) -> void:
 			jelly.start_slot = slot
 			jelly.layout_scale = pocket_scale(index)
 			jelly.scale = Vector2.ONE * jelly.layout_scale
-			jelly.position = center_at(index, slot + (amount - 1) * 0.5) - jelly.size * jelly.layout_scale * 0.5
+			jelly.position = jelly.origin_for_center(center_at(index, slot + (amount - 1) * 0.5))
 			jelly.origin = jelly.position
 			pieces.add_child(jelly)
-			if Puzzle.is_complete(pocket):
-				jelly.material.set_shader_parameter("asleep", 1.0)
 			jellies.append(jelly)
 			if animate:
 				jelly.modulate.a = 0
@@ -188,7 +157,7 @@ func play_pour(source: int, target: int, amount: int, after: Array) -> void:
 	var start: Vector2 = center_at(source, after[source].size() + (amount - 1) * 0.5)
 	var end: Vector2 = center_at(target, below + (amount - 1) * 0.5)
 	flying.layout_scale = pocket_scale(source)
-	flying.origin = start - flying.size * flying.layout_scale * 0.5
+	flying.origin = flying.origin_for_center(start)
 	flying.position = flying.origin
 	flying.scale = Vector2.ONE * flying.layout_scale
 	var lean: float = signf(end.x - start.x) if not is_equal_approx(end.x, start.x) else 0.0
@@ -197,7 +166,7 @@ func play_pour(source: int, target: int, amount: int, after: Array) -> void:
 	tween.tween_property(flying, "squash", Vector2(1.13, 0.87), LIFT_TIME).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	tween.tween_method(func(t: float) -> void:
 		flying.layout_scale = lerpf(pocket_scale(source), pocket_scale(target), t)
-		flying.origin = start.lerp(end, t) + Vector2(0, -sin(t * PI) * ARC_HEIGHT) - flying.size * flying.layout_scale * 0.5
+		flying.origin = flying.origin_for_center(start.lerp(end, t) + Vector2(0, -sin(t * PI) * ARC_HEIGHT))
 		var stretch: float = sin(t * PI) * 0.6 + pow(t, 4.0) * 0.5
 		flying.squash = Vector2(1.13, 0.87).lerp(Vector2.ONE, minf(t * 5.0, 1.0)) + Vector2(-0.1, 0.16) * stretch
 		flying.rotation = sin(t * TAU) * 0.09 * lean
@@ -279,10 +248,7 @@ func _draw() -> void:
 			style.set_border_width_all(3)
 			style.set_corner_radius_all(70)
 			draw_style_box(style, rect)
-		if Puzzle.is_complete(pockets[i]):
-			var at: Vector2 = center_at(i, 0) + Vector2(49, 36) * pocket_scale(i)
-			draw_circle(at, 12, Color("faf3df"))
-			draw_polyline(PackedVector2Array([at + Vector2(-5, 0), at + Vector2(-1, 4), at + Vector2(6, -5)]), Color("849b70"), 3, true)
+
 	if hinted >= 0 and selected >= 0:
 		var from: Vector2 = center_at(selected, pockets[selected].size() - 1) + Vector2(0, -68) * pocket_scale(selected)
 		var to: Vector2 = center_at(hinted, pockets[hinted].size()) + Vector2(0, -57) * pocket_scale(hinted)

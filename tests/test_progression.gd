@@ -27,6 +27,11 @@ func _initialize() -> void:
 	store.unlocked = 106
 	var generator: RefCounted = Generator.new()
 	var generated: Dictionary = generator.generate(104, 54321)
+	check(store.get("board_layout") != null, "Persistence includes the current board geometry")
+	if failures:
+		_finish()
+		return
+	store.set("board_layout", generated["layout"])
 	var puzzle: BlobblePuzzle = Puzzle.new()
 	puzzle.setup(generated["pockets"])
 	var move: Array = generated["solution"][0]
@@ -37,6 +42,9 @@ func _initialize() -> void:
 	restored.call("read_save")
 	check(restored.level == 104 and restored.unlocked == 106, "Progress beyond the old thirty-level cap survives reload")
 	check(restored.get("campaign_seed") == 54321, "Reload preserves the campaign seed")
+	var restored_layout: Dictionary = restored.get("board_layout")
+	check(restored_layout.get("version") == 3 and restored_layout.get("wells", []).size() == 12, "Saved geometry survives reload")
+	check(is_equal_approx(restored_layout["wells"][0]["center"][0], generated["layout"]["wells"][0]["center"][0]), "Reload preserves generated pocket coordinates")
 	check(Puzzle.state_key(restored.saved_board) == Puzzle.state_key(puzzle.pockets), "Generated board survives reload")
 	check(restored.saved_history.size() == 1 and Puzzle.state_key(restored.saved_history[0]) == Puzzle.state_key(puzzle.history[0]), "Generated undo history survives reload")
 	check(generator.generate(restored.level, restored.get("campaign_seed"))["pockets"] == puzzle.initial, "Restart after reload reproduces the exact initial puzzle")

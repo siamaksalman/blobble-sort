@@ -95,6 +95,22 @@ func run() -> void:
 	await create_timer(0.4).timeout
 	check(absf(lifted.position.y - rest) < 1.0, "A deselected jelly returns to rest")
 
+	# Reference-derived geometry also supports pours between moved or mirrored pockets.
+	var geometry: Dictionary = preload("res://scripts/board_layout.gd").new().generate(3)
+	board.apply_layout(geometry)
+	var before: Array = layout([2], [])
+	before[11] = [2]
+	var after: Array = layout([], [])
+	after[11] = [2, 2]
+	board.refresh(before)
+	await follow_pour(board, 0, 11, 1, after)
+	var result: BlobbleJelly = board.jelly_at(11, 1)
+	check(result.count == 2, "A pour across generated wells still merges")
+	await create_timer(0.9).timeout
+	check(is_equal_approx(result.scale.x, geometry["wells"][11]["scale"]), "A traveling jelly adopts its destination pocket scale")
+	var rendered_center: Vector2 = result.get_transform() * (result.size * 0.5)
+	check(rendered_center.is_equal_approx(board.center_at(11, 0.5)), "Scaled merged jelly lands inside the destination pocket")
+
 	print("Animation checks: %d passed, %d failed" % [checks - failures, failures])
 	board.queue_free()
 	await process_frame

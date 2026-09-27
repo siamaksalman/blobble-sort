@@ -38,6 +38,8 @@ func run() -> void:
 	game.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	root.add_child(game)
 	await create_timer(1.0).timeout
+	check(game.board.layout_data == game.current_level["layout"], "Game applies the procedural layout to the visible board")
+	var first_geometry: String = JSON.stringify(game.board.layout_data)
 	await snapshot("preview")
 	var hint: Vector2i = game.solver.get_hint(game.puzzle.pockets)
 	await click_pocket(hint.x)
@@ -66,8 +68,17 @@ func run() -> void:
 	check(game.save.unlocked == 2, "Winning unlocks the next level")
 	check(is_instance_valid(game._modal), "Winning displays the completion dialog")
 	await snapshot("win-preview")
+	await create_timer(9.2).timeout # Let victory particles finish before layout captures.
 	game._load_level(1)
 	check(game.save.level == 1 and game.puzzle.moves == 0, "Next level loads cleanly")
+	check(JSON.stringify(game.board.layout_data) != first_geometry, "Next level uses a different board layout")
+	await create_timer(0.5).timeout
+	await snapshot("layout-level-02")
+	# Keep a small visual gallery covering reference-preserving variations.
+	for index: int in [2, 3, 8, 17]:
+		game._load_level(index)
+		await create_timer(0.4).timeout
+		await snapshot("layout-level-%02d" % (index + 1))
 	# The campaign continues beyond the old last level and offers paged selection.
 	game.save.unlocked = 32
 	game._load_level(30)
@@ -84,7 +95,6 @@ func run() -> void:
 	await snapshot("desktop-preview")
 	check(game.board.position.x >= 0 and game.board.position.y >= 0, "Landscape board stays on screen")
 	print("Visual playtest failures: ", failures)
-	await create_timer(3.5).timeout
 	game.queue_free()
 	await process_frame
 	quit(1 if failures else 0)

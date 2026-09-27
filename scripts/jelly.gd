@@ -2,6 +2,10 @@ class_name BlobbleJelly
 extends ColorRect
 
 const SHADER: Shader = preload("res://shaders/jelly.gdshader")
+const REFERENCE: Texture2D = preload("res://assets/textures/reference_jellies.jpg")
+# Sprite bounds in the unmodified user reference; pixels are sampled directly.
+const SINGLE_RECTS: Array[Rect2] = [Rect2(314, 908, 109, 89), Rect2(217, 316, 101, 96), Rect2(728, 890, 112, 105), Rect2(623, 909, 99, 94), Rect2(514, 1371, 116, 107), Rect2(727, 1376, 114, 103)]
+const LONG_RECTS: Array[Rect2] = [Rect2(314, 908, 109, 89), Rect2(217, 316, 101, 96), Rect2(316, 162, 111, 365), Rect2(312, 1106, 114, 281), Rect2(313, 668, 113, 244), Rect2(728, 164, 116, 357)]
 const COLORS: Array[Color] = [Color("ff9d58"), Color("43baf1"), Color("ffe44c"), Color("f777b8"), Color("58dfa6"), Color("ae7bf0")]
 var pocket_index: int = -1
 var start_slot: int = 0
@@ -24,12 +28,16 @@ func configure(color: int, amount: int, show_symbols: bool = false) -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	size = Vector2(140, 140 + (count - 1) * 89)
 	# Squash from the bottom of the body so jellies stay seated in their pocket.
-	pivot_offset = Vector2(size.x * 0.5, (size.y + 101.0 + (count - 1) * 89.0) * 0.5)
+	pivot_offset = Vector2(size.x * 0.5, (size.y + 104.0 + (count - 1) * 89.0) * 0.5)
 	var shader_material: ShaderMaterial = ShaderMaterial.new()
 	shader_material.shader = SHADER
 	shader_material.set_shader_parameter("jelly_color", COLORS[color])
+	shader_material.set_shader_parameter("reference_art", REFERENCE)
+	var region: Rect2 = SINGLE_RECTS[color] if count == 1 else LONG_RECTS[color]
+	shader_material.set_shader_parameter("source_rect", Vector4(region.position.x, region.position.y, region.size.x, region.size.y))
+	shader_material.set_shader_parameter("single", count == 1)
 	shader_material.set_shader_parameter("rect_size", size)
-	shader_material.set_shader_parameter("body_height", 101.0 + (count - 1) * 89.0)
+	shader_material.set_shader_parameter("body_height", 104.0 + (count - 1) * 89.0)
 	_seed = randf() * 20.0
 	shader_material.set_shader_parameter("seed", _seed)
 	shader_material.set_shader_parameter("symbols", 1.0 if show_symbols else 0.0)
@@ -49,6 +57,11 @@ func _process(delta: float) -> void:
 func _apply_pose() -> void:
 	position = origin + Vector2(0, _lift * layout_scale)
 	scale = squash * _grow * layout_scale
+
+func origin_for_center(center: Vector2) -> Vector2:
+	# Control scaling pivots at the body's bottom; compensate for the base scale
+	# while keeping the springy squash pivot anchored during landing animations.
+	return center - size * layout_scale * 0.5 - pivot_offset * (1.0 - layout_scale)
 
 func set_selected(value: bool) -> void:
 	selected = value

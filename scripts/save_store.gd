@@ -15,11 +15,13 @@ var saved_history: Array = []
 var saved_moves: int = 0
 var campaign_seed: int = Generator.DEFAULT_SEED
 var legacy_level: bool = false
+var board_layout: Dictionary = {}
 
 func read_save(legacy_levels: Array = []) -> void:
 	saved_board.clear()
 	saved_history.clear()
 	saved_moves = 0
+	board_layout.clear()
 	if not FileAccess.file_exists(path):
 		return
 	var data: Variant = JSON.parse_string(FileAccess.get_file_as_string(path))
@@ -37,6 +39,8 @@ func read_save(legacy_levels: Array = []) -> void:
 	symbols = bool(data.get("symbols", false))
 	if data.get("best") is Dictionary:
 		best = data["best"]
+	if data.get("layout") is Dictionary:
+		board_layout = data["layout"]
 	if not legacy_level and int(data.get("generator_version", 0)) != Generator.VERSION:
 		return
 	var board: Variant = data.get("board", [])
@@ -53,6 +57,7 @@ func read_save(legacy_levels: Array = []) -> void:
 func write_save(puzzle: BlobblePuzzle) -> void:
 	var data: Dictionary = {"version": 2, "level": level, "unlocked": unlocked,
 		"campaign_seed": campaign_seed, "generator_version": Generator.VERSION, "legacy_level": legacy_level,
+		"layout": board_layout,
 		"sound": sound, "symbols": symbols, "best": best,
 		"board": puzzle.pockets, "moves": puzzle.moves, "history": puzzle.history}
 	var file: FileAccess = FileAccess.open(path + ".tmp", FileAccess.WRITE)

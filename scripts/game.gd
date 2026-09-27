@@ -7,14 +7,11 @@ const Jelly = preload("res://scripts/jelly.gd")
 const Solver = preload("res://scripts/hint_solver.gd")
 const SaveStore = preload("res://scripts/save_store.gd")
 const Generator = preload("res://scripts/level_generator.gd")
+const Layout = preload("res://scripts/board_layout.gd")
 const FONT: Font = preload("res://assets/fonts/interface.tres")
 const INK: Color = Color("665343")
 const MUTED: Color = Color("947b63")
-const SOUNDS: Dictionary = {
-	"pick": preload("res://assets/audio/pick.wav"),
-	"plop": preload("res://assets/audio/plop.wav"),
-	"merge": preload("res://assets/audio/merge.wav"),
-	"win": preload("res://assets/audio/win.wav")}
+const SoundBank = preload("res://scripts/sound_bank.gd")
 
 var puzzle: BlobblePuzzle = Puzzle.new()
 var solver: BlobbleHintSolver = Solver.new()
@@ -32,7 +29,7 @@ var _undo_button: Button
 var _sound_button: Button
 var _modal: Control
 var _modal_panel: Panel
-var _audio: AudioStreamPlayer
+var sounds: BlobbleSoundBank
 var _selected: int = -1
 var _busy: bool = false
 var _press_pocket: int = -1
@@ -49,8 +46,8 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	if not test_mode:
 		save.read_save()
-	_audio = AudioStreamPlayer.new()
-	add_child(_audio)
+	sounds = SoundBank.new()
+	add_child(sounds)
 	_create_interface()
 	_confetti_layer = Node2D.new()
 	_confetti_layer.z_index = 100
@@ -159,6 +156,7 @@ func _load_level(index: int, restore: bool = false) -> void:
 		var legacy: Array = JSON.parse_string(FileAccess.get_file_as_string("res://assets/levels.json"))
 		current_level = legacy[index].duplicate(true)
 		current_level["difficulty"] = {"name": "Classic", "colors": 6}
+		current_level["layout"] = Layout.new().generate(index, save.campaign_seed)
 	else:
 		current_level = generator.generate(index, save.campaign_seed)
 	puzzle.setup(current_level["pockets"])
@@ -169,7 +167,11 @@ func _load_level(index: int, restore: bool = false) -> void:
 		puzzle.moves = save.saved_moves
 		puzzle.history = save.saved_history.duplicate(true)
 	_selected = -1
+	_keyboard_pocket = 0
 	board.selected = -1
+	board.keyboard_focus = -1
+	save.board_layout = current_level.get("layout", {}).duplicate(true)
+	board.apply_layout(save.board_layout)
 	board.show_symbols = save.symbols
 	board.refresh(puzzle.pockets, true)
 	_busy = false
@@ -192,7 +194,7 @@ func _input(event: InputEvent) -> void:
 			if is_instance_valid(_modal):
 				_close_modal()
 			else:
-				_select(-1)
+				_deselect()
 			get_viewport().set_input_as_handled()
 			return
 		if is_instance_valid(_modal) or _busy:
@@ -202,10 +204,10 @@ func _input(event: InputEvent) -> void:
 			KEY_H: _hint()
 			KEY_R: _confirm_restart()
 			KEY_M: _toggle_sound()
-			KEY_LEFT: _keyboard_pocket = (_keyboard_pocket + 11) % 12
-			KEY_RIGHT: _keyboard_pocket = (_keyboard_pocket + 1) % 12
-			KEY_UP: _keyboard_pocket = (_keyboard_pocket + 8) % 12
-			KEY_DOWN: _keyboard_pocket = (_keyboard_pocket + 4) % 12
+			KEY_LEFT: _keyboard_pocket = board.directional_neighbor(_keyboard_pocket, Vector2.LEFT)
+			KEY_RIGHT: _keyboard_pocket = board.directional_neighbor(_keyboard_pocket, Vector2.RIGHT)
+			KEY_UP: _keyboard_pocket = board.directional_neighbor(_keyboard_pocket, Vector2.UP)
+			KEY_DOWN: _keyboard_pocket = board.directional_neighbor(_keyboard_pocket, Vector2.DOWN)
 			KEY_ENTER, KEY_SPACE: _activate_pocket(_keyboard_pocket)
 		board.keyboard_focus = _keyboard_pocket
 		board.queue_redraw()
@@ -227,14 +229,19 @@ func _unhandled_input(event: InputEvent) -> void:
 				else:
 					_activate_pocket(target)
 			elif target < 0:
-				_select(-1)
+				_deselect()
 			_press_pocket = -1
 
-func _select(index: int) -> void:
+func _select(index: int, quiet: bool = false) -> void:
 	_selected = index
 	board.set_selection(index)
-	if index >= 0:
-		_play("pick")
+	if index >= 0 and not quiet:
+		_play("select")
+
+func _deselect() -> void:
+	if _selected >= 0:
+		_select(-1)
+		_play("deselect")
 
 func _activate_pocket(index: int) -> void:
 	if _busy:
@@ -244,23 +251,32 @@ func _activate_pocket(index: int) -> void:
 			_select(index)
 		return
 	if _selected == index:
-		_select(-1)
+		_deselect()
 		return
 	var amount: int = Puzzle.transfer_size(puzzle.pockets, _selected, index)
 	if amount > 0:
 		_animate_pour(_selected, index, amount)
 	else:
+		_play("invalid")
 		_toast("Find the same color on top, or an empty pocket")
 		if not puzzle.pockets[index].is_empty():
-			_select(index)
+			_select(index, true)
 
 func _animate_pour(source: int, target: int, amount: int) -> void:
 	_busy = true
 	var old_complete: int = puzzle.completed_count()
+	var merging: bool = not puzzle.pockets[target].is_empty()
 	_select(-1)
 	puzzle.pour(source, target)
+	_play("pour")
 	await board.play_pour(source, target, amount, puzzle.pockets)
-	_play("merge" if puzzle.completed_count() > old_complete else "plop")
+	if Puzzle.solved(puzzle.pockets):
+		pass  # _win plays the jingle.
+	elif puzzle.completed_count() > old_complete:
+		_play("complete")
+	else:
+		# Landings climb the pentatonic scale as a pocket fills up.
+		_play("merge" if merging else "plop", SoundBank.scale_pitch(puzzle.pockets[target].size() - 1))
 	if OS.has_feature("mobile"):
 		Input.vibrate_handheld(18)
 	_busy = false
@@ -277,7 +293,7 @@ func _undo() -> void:
 	_close_modal()
 	_select(-1)
 	board.refresh(puzzle.pockets)
-	_play("pick")
+	_play("undo")
 	_update_status()
 	_persist()
 	_toast("A little step back. Take your time.")
@@ -301,13 +317,13 @@ func _hint() -> void:
 		return
 	_selected = hint.x
 	board.set_selection(hint.x, hint.y)
-	_play("pick")
+	_play("hint")
 	_toast("This jelly would love the highlighted pocket")
 
 func _toggle_sound() -> void:
 	save.sound = not save.sound
 	_update_status()
-	_play("pick")
+	_play("tap")
 	_persist()
 
 func _show_help() -> void:
@@ -436,6 +452,7 @@ func _button(text: String, at: Vector2, dimensions: Vector2, action: Callable, f
 	button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	button.focus_mode = Control.FOCUS_NONE
 	_style_button(button, Color(1.0, 0.975, 0.928, 0.5) if flat else Color("fff7e9"), INK, flat)
+	button.pressed.connect(_play.bind("tap"))
 	button.pressed.connect(action)
 	return button
 
@@ -469,10 +486,9 @@ func _toast(text: String) -> void:
 	if id == _toast_id:
 		_message.text = "Tap a jelly, then a matching or empty pocket"
 
-func _play(sound: String) -> void:
+func _play(sound: String, pitch: float = 1.0) -> void:
 	if save.sound:
-		_audio.stream = SOUNDS[sound]
-		_audio.play()
+		sounds.play(sound, pitch)
 
 func _persist() -> void:
 	if not test_mode:
