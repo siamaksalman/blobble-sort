@@ -84,6 +84,8 @@ func wobble(strength: float, duration: float = 0.55, delay: float = 0.0) -> void
 		_wobble_tween.tween_callback(_start_wobble.bind(strength))
 	else:
 		_start_wobble(strength)
+	# Let the impact read for a couple of frames before the elastic release.
+	_wobble_tween.tween_interval(0.035)
 	_wobble_tween.tween_property(self, "squash", Vector2.ONE, duration).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
 
 func _start_wobble(strength: float) -> void:

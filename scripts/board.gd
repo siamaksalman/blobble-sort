@@ -105,6 +105,29 @@ func hit_test(global_point: Vector2) -> int:
 			return i
 	return -1
 
+## A press squishes the contacted body and passes a softer pulse to its neighbors.
+func poke_at(global_point: Vector2) -> void:
+	var pocket: int = hit_test(global_point)
+	if pocket < 0:
+		return
+	# Test the visible capsule, including its current lift and deformation.
+	for index: int in range(jellies.size() - 1, -1, -1):
+		var touched: BlobbleJelly = jellies[index]
+		if touched.pocket_index != pocket:
+			continue
+		var point: Vector2 = touched.get_global_transform().affine_inverse() * global_point - touched.size * 0.5
+		var half_line: float = maxf(0.0, touched.body_height * 0.5 - 52.0)
+		point.y -= clampf(point.y, -half_line, half_line)
+		if point.length_squared() > 52.0 * 52.0:
+			continue
+		for neighbor: int in jellies.size():
+			var jelly: BlobbleJelly = jellies[neighbor]
+			if jelly.pocket_index != pocket:
+				continue
+			var distance: int = absi(neighbor - index)
+			jelly.wobble(0.14 * pow(0.62, distance) / sqrt(float(jelly.count)), 0.55, distance * 0.045)
+		return
+
 func refresh(state: Array, animate: bool = false) -> void:
 	pockets = state.duplicate(true)
 	for jelly: BlobbleJelly in jellies:

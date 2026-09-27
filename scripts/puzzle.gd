@@ -42,8 +42,6 @@ static func transfer_size(state: Array, source: int, target: int) -> int:
 	var b: Array = state[target]
 	if a.is_empty() or b.size() >= CAPACITY:
 		return 0
-	if not b.is_empty() and int(a.back()) != int(b.back()):
-		return 0
 	return mini(top_count(a), CAPACITY - b.size())
 
 static func apply_to(state: Array, source: int, target: int) -> int:

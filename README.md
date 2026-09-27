@@ -10,7 +10,11 @@ Open `project.godot` with `/Users/siamak/Downloads/Godot.app`, then press **F6**
 make run
 ```
 
-Tap a pocket to select its top group, then tap another pocket. Equal colors stack together, and empty pockets accept any color. A pocket holds four blobs; adjacent equal colors become a single long jelly. Complete ten groups to finish. Dragging between pockets also works.
+Tap a pocket to select its top group, then tap any pocket with space. Every color can move onto any other color. A pocket holds four blobs; adjacent equal colors become a single long jelly. Complete ten groups to finish. Dragging between pockets also works.
+
+Lower blobs react to the weight above them: lifting releases a small rebound, setting a blob down compresses its support, and landings send a diminishing wobble down the stack. Upper blobs follow the changing support height and settle back into place. These reactions preserve the sorting rules and original resting artwork.
+
+Press any blob, including a lower one, to squish it and send a soft wobble both up and down its stack. Different colors pass the reaction along while keeping their own shapes and colors. More distant blobs react later and more gently.
 
 - **Undo**, **Restart**, and **Hint** are always free.
 - Tap the **level badge** to choose an unlocked puzzle.
@@ -18,7 +22,7 @@ Tap a pocket to select its top group, then tap another pocket. Equal colors stac
 - **Arrows + Enter/Space** select pockets; **Z/U** undo, **H** hints, **R** restarts, **M** toggles sound, **Escape** dismisses.
 - Progress, undo history, sound settings, and records save automatically.
 
-The reference only defines an appearance, so the rules are an interpretation. The maze connections are decorative: groups transfer between any compatible pockets. Starting arrangements are generated at runtime to guarantee solvability; they do not reproduce every character position in the reference.
+The reference only defines an appearance, so the rules are an interpretation. The maze connections are decorative: top groups transfer to any pocket with space, regardless of color. Starting arrangements are generated at runtime to guarantee solvability; they do not reproduce every character position in the reference.
 
 ## Procedural progression
 
@@ -26,23 +30,30 @@ Every level is generated on demand from the campaign seed and level number. Rest
 
 Layouts preserve the reference's four-column, three-row proportions, broad sculpted channels, and full-size round jellies. The first board retains the original layout. Later levels generate a connected maze on the twelve pockets: a random spanning tree supplies eleven passages, then zero to four extra passages add loops. This changes which walls are open or closed and produces different branches, loops, and dead ends. Horizontal openings also vary between upper, middle, and lower positions.
 
-The renderer assembles open passages and closed walls from sections of the same clay artwork, preserving its grain, rounded edges, and lighting. Small seeded spacing changes and mirroring add variation. Maze passages remain decorative under the existing sorting rules; they do not restrict transfers to compatible pockets.
+The renderer assembles open passages and closed walls from sections of the same clay artwork, preserving its grain, rounded edges, and lighting. Small seeded spacing changes and mirroring add variation. Maze passages remain decorative; they do not restrict transfers.
 
 Geometry uses its own seeded random stream, so maze appearance does not alter puzzle difficulty or solutions. Existing saves retain their color arrangement and undo history; layout version 3 regenerates the maze automatically. Reopening the same level reproduces the same walls and openings.
 
-Every level starts with all six colors dealt across the pockets. No pocket begins finished, and no pocket holds more than two of one color. Early levels are eased by allowing a few equal colors to sit directly on each other; that allowance shrinks until every blob starts apart.
+Every level starts with all six colors dealt across the pockets. No pocket begins finished, and no pocket holds more than two of one color. Early levels are eased two ways: the board holds fewer color groups (four blobs each), spread thinly so there is plenty of room to move, and a few equal colors may sit directly on each other. Both easings fade as levels advance.
 
-| Levels | Difficulty | Equal neighbors at the start |
+| Levels | Color groups (blobs) | Equal neighbors at the start |
 | --- | --- | --- |
-| 1–2 | Gentle | 4 |
-| 3–4 | Gentle | 3 |
-| 5–6 | Easy | 2 |
-| 7–8 | Easy | 1 |
-| 9–20 | Thoughtful | 0 |
-| 21–40 | Tricky | 0 |
-| 41 onward | Expert | 0 |
+| 1–2 | 6 (24) | 4 |
+| 3 | 6 (24) | 3 |
+| 4 | 7 (28) | 3 |
+| 5–6 | 7 (28) | 2 |
+| 7–8 | 8 (32) | 1 |
+| 9 | 8 (32) | 0 |
+| 10–12 | 9 (36) | 0 |
+| 13 onward | 10 (40) | 0 |
 
-Generation deals the blobs with a seeded shuffle until the deal meets the level's spread rules, then certifies it with the hint solver's bounded search and keeps that route as the solution certificate. Deals the search cannot finish are discarded, so every level is known to be solvable. No network or pre-generated campaign is needed. The original JSON catalog is retained only to preserve in-progress saves from the first version. Saves record the campaign seed and generator version; generator version 2 (spread-out deals) replaces older in-progress boards with the new deal while keeping unlocked levels and records.
+Difficulty is estimated from the actual board and its certified solution. The score is `(excess color runs + solution moves) × (1 + occupied-slot fraction + blocked-move fraction)`, rounded to an integer. Excess runs count separate color groups beyond the number needed in the solved board. Mobility counts every legal source/destination pair under the current rules, including moves onto other colors; additional space therefore reduces the estimate. Solution length comes from a bounded search, not an optimal solution, so this is a reproducible heuristic rather than a measured human difficulty or minimum move count.
+
+Scores below 60 are Gentle, below 90 Easy, below 200 Thoughtful, below 240 Tricky, and otherwise Expert. The displayed label follows the selected board's score instead of its level number. The target rises from 50 on level 1 to 182 on level 13, then by two points per level until it caps at 258 on level 51. Actual scores can vary between neighboring levels.
+
+Generation deals blobs with a seeded shuffle, certifies four candidates that meet the spread rules, and selects the candidate closest to the target score. The hint solver tries consolidation first but also searches temporary mixed-color stacks, allowing routes that require the new movement rules. Deals the bounded search cannot finish are discarded. Each selected level retains its verified solution certificate, and the same seed and level reproduce the same board and rating. No network or pre-generated campaign is needed.
+
+The original JSON catalog is retained only for in-progress saves from the first version. Saves record the campaign seed and generator version; generator version 3 (difficulty measured under unrestricted color moves) replaces older generated in-progress boards and undo histories while keeping unlocked levels, preferences, and records. Legacy catalog games remain playable.
 
 ## Builds
 
@@ -75,7 +86,7 @@ make playtest   # Real input, animation, hints, win/unlock, portrait/landscape c
 make test-art   # Reference fidelity plus rendered open/closed maze gates
 ```
 
-`tests/web_playtest.cjs` runs a Chromium mobile/desktop test using Playwright. It checks WebGL startup, real touch input on two different layouts, persisted game data and geometry in IndexedDB, reload, level completion, and resizing. Set `PLAYWRIGHT_MODULE` and `CHROMIUM_PATH` if using an existing installation. Run `make serve` first.
+`tests/web_playtest.cjs` runs a Chromium mobile/desktop test using Playwright. It checks WebGL startup, real touch input on two different layouts, persisted game data and geometry in IndexedDB, reload, level completion, and resizing. Set `PLAYWRIGHT_MODULE` and `CHROMIUM_PATH` if using an existing installation. The browser completion check uses a verified route from the actual saved puzzle; set `GODOT` if the engine is not on your PATH or at the local macOS path. Run `make serve` first.
 
 Development follows the red → green → refactor cycle in [AGENTS.md](AGENTS.md). New behavior and bug fixes start with a failing test. The save regression suite uses a disposable file under `tests/.tmp/`; it never modifies player progress. Tests added to the original implementation were retrospective; subsequent fixes follow TDD.
 

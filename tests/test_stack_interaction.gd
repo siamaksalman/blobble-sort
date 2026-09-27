@@ -36,6 +36,28 @@ func run() -> void:
 	root.add_child(board)
 	board.apply_layout(preload("res://scripts/board_layout.gd").new().generate(3))
 	board.refresh(state([0, 1, 2, 3], [4]))
+	var before_poke: Array = board.pockets.duplicate(true)
+	# Dispatch the same board-space contact used by pointer input.
+	check(board.has_method("poke_at"), "The board supports direct blob contact")
+	if board.has_method("poke_at"):
+		board.call("poke_at", board.get_global_transform() * board.center_at(0, 1))
+		check(deformation(board.jelly_at(0, 1)) > 0.15, "The touched blob visibly squishes")
+		var reactions: Array[float] = [0.0, 0.0, 0.0, 0.0]
+		var end: int = Time.get_ticks_msec() + 300
+		while Time.get_ticks_msec() < end:
+			await process_frame
+			for slot: int in 4:
+				reactions[slot] = maxf(reactions[slot], deformation(board.jelly_at(0, slot)))
+		check(reactions[0] > 0.02 and reactions[2] > 0.02, "Contact travels into different colors above and below")
+		check(reactions[3] > 0.01 and reactions[3] < reactions[2], "The reaction fades as it travels farther through the stack: %s" % [reactions])
+		check(deformation(board.jelly_at(1, 0)) < 0.001, "Contact does not disturb another pocket")
+		check(board.pockets == before_poke, "Physical contact preserves colors and puzzle positions")
+		await create_timer(0.8).timeout
+		for jelly: BlobbleJelly in board.jellies:
+			check(deformation(jelly) < 0.002, "Contact settles back to the resting shape")
+		board.call("poke_at", board.get_global_transform() * board.center_at(0, 3.8))
+		check(deformation(board.jelly_at(0, 3)) < 0.002, "Touching empty space above a stack does not poke a blob")
+	board.refresh(state([0, 1, 2, 3], [4]))
 	board.set_selection(0)
 	check(board.jelly_at(0, 2).squash.y > 1.02, "Lifting the top jelly lets its immediate support stretch upward")
 	check(deformation(board.jelly_at(0, 0)) < 0.001, "The reaction reaches deeper supports after a short delay")

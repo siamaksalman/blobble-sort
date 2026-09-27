@@ -6,6 +6,8 @@ const Puzzle = preload("res://scripts/puzzle.gd")
 var known: Dictionary = {}
 var _visited: Dictionary = {}
 var _remaining: int = 0
+## States the last solve() explored; a rough measure of how much a board fights back.
+var searched: int = 0
 
 func register_level(layout: Array, solution: Array) -> void:
 	var state: Array = layout.duplicate(true)
@@ -31,9 +33,10 @@ func solve(state: Array, budget: int = 18000) -> Array[Vector2i]:
 	_visited.clear()
 	_remaining = budget
 	var path: Array[Vector2i] = []
-	if _search(state.duplicate(true), 0, path, Vector2i(-1, -1)):
-		return path
-	path.clear()
+	var found: bool = _search(state.duplicate(true), 0, path, Vector2i(-1, -1))
+	searched = budget - _remaining
+	if not found:
+		path.clear()
 	return path
 
 func _search(state: Array, depth: int, path: Array[Vector2i], previous: Vector2i) -> bool:
@@ -60,9 +63,13 @@ func _search(state: Array, depth: int, path: Array[Vector2i], previous: Vector2i
 					continue
 				used_empty = true
 			var score: int = amount * 2
-			if not state[target].is_empty():
+			var matching: bool = not state[target].is_empty() and state[source].back() == state[target].back()
+			if matching:
 				score += 5
-			if amount + state[target].size() == Puzzle.CAPACITY:
+			elif not state[target].is_empty():
+				# Temporary mixed stacks are legal, but try consolidation first.
+				score -= 20
+			if matching and amount + state[target].size() == Puzzle.CAPACITY:
 				score += 8
 			candidates.append([source, target, score])
 	candidates.sort_custom(func(a: Array, b: Array) -> bool: return a[2] > b[2])

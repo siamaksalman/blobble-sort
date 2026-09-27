@@ -113,7 +113,7 @@ func run() -> void:
 	await process_frame
 	game.save.sound = true
 
-	stage(game, fill([1, 2], [2], [], [3, 3, 3]))
+	stage(game, fill([1, 2], [2], [], [3, 3, 3, 3]))
 	game._activate_pocket(0)
 	check(last_cue(game) == "select", "Picking up a jelly plays the select cue")
 	game._activate_pocket(0)
@@ -134,6 +134,9 @@ func run() -> void:
 	await game._animate_pour(0, 2, 1)
 	check(last_cue(game) == "plop", "Landing in an empty pocket plops")
 	check(is_equal_approx(latest_pitch(game), SoundBank.scale_pitch(0)), "The first jelly in a pocket plops on the root note")
+	stage(game, fill([1], [2], [], [3, 3, 3]))
+	await game._animate_pour(0, 1, 1)
+	check(last_cue(game) == "plop", "Landing on a different color plops without a merge cue")
 	stage(game, fill([1, 1], [1], [2]))
 	await game._animate_pour(0, 1, 2)
 	check(last_cue(game) == "merge" and is_equal_approx(latest_pitch(game), SoundBank.scale_pitch(2)), "Landings climb the scale as a pocket fills")

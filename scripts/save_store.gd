@@ -44,7 +44,8 @@ func read_save(legacy_levels: Array = []) -> void:
 	if not legacy_level and int(data.get("generator_version", 0)) != Generator.VERSION:
 		return
 	var board: Variant = data.get("board", [])
-	var expected: Array[int] = Puzzle.inventory(Generator.SOLVED)
+	# Early generated levels hold fewer blobs, so validate against this level's own deal.
+	var expected: Array[int] = Puzzle.inventory(Generator.SOLVED) if legacy_level else Puzzle.inventory(Generator.new().generate(level, campaign_seed)["pockets"])
 	if Puzzle.valid_layout(board) and Puzzle.inventory(board) == expected:
 		saved_board = board
 		saved_moves = maxi(0, int(data.get("moves", 0)))

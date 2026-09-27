@@ -41,6 +41,38 @@ func run() -> void:
 	check(game.board.layout_data == game.current_level["layout"], "Game applies the procedural layout to the visible board")
 	var first_geometry: String = JSON.stringify(game.board.layout_data)
 	await snapshot("preview")
+	# Real pointer contact on a lower blob ripples through a mixed-color stack.
+	game.puzzle.setup([[0, 1, 2, 3], [4], [], [], [], [], [], [], [], [], [], []])
+	game.board.refresh(game.puzzle.pockets)
+	var contact: Vector2 = root.get_final_transform() * game.board.get_global_transform() * game.board.center_at(0, 1)
+	var press: InputEventMouseButton = InputEventMouseButton.new()
+	press.position = contact
+	press.button_index = MOUSE_BUTTON_LEFT
+	press.pressed = true
+	Input.parse_input_event(press)
+	await process_frame
+	check(game.board.jelly_at(0, 1).squash.y < 0.98, "Pressing a lower blob squishes it")
+	var upper_reaction: float = 0.0
+	var observe_until: int = Time.get_ticks_msec() + 250
+	while Time.get_ticks_msec() < observe_until:
+		await process_frame
+		upper_reaction = maxf(upper_reaction, absf(game.board.jelly_at(0, 2).squash.y - 1.0))
+	check(upper_reaction > 0.01, "Pointer contact makes the different-colored blob above react")
+	await snapshot("mixed-color-contact")
+	press = press.duplicate()
+	press.pressed = false
+	Input.parse_input_event(press)
+	await process_frame
+	check(game.puzzle.moves == 0, "Poking a stack does not make a puzzle move")
+	game._select(-1)
+	await click_pocket(0)
+	await click_pocket(1)
+	await create_timer(0.65).timeout
+	check(game.puzzle.pockets[0] == [0, 1, 2] and game.puzzle.pockets[1] == [4, 3], "Pointer input moves a top blob onto a different color")
+	check(game.board.jelly_at(1, 0).count == 1 and game.board.jelly_at(1, 1) != null, "Different colors remain separate after landing")
+	game._undo()
+	check(game.puzzle.pockets == game.puzzle.initial and game.puzzle.moves == 0, "UI undo restores a cross-color move")
+	game._load_level(0)
 	var hint: Vector2i = game.solver.get_hint(game.puzzle.pockets)
 	await click_pocket(hint.x)
 	check(game._selected == hint.x, "Mouse input selects a pocket")

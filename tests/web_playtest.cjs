@@ -1,6 +1,8 @@
 /* Run with PLAYWRIGHT_MODULE pointing to an installed @playwright/test package. */
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || '@playwright/test');
 const assert = require('node:assert/strict');
+const { execFileSync } = require('node:child_process');
+const { existsSync } = require('node:fs');
 
 (async () => {
   const browser = await chromium.launch({
@@ -20,7 +22,7 @@ const assert = require('node:assert/strict');
   // At 390×844 the game letterboxes its base 900×1600 canvas by expanding vertically.
   // Read the generated state rather than depending on a fixed first-level fixture.
   const initialSave = await readSave();
-  assert.equal(initialSave?.generator_version, 1, 'Browser starts a procedural campaign');
+  assert.equal(initialSave?.generator_version, 3, 'Browser starts a procedural campaign');
   assert.equal(initialSave?.legacy_level, false, 'New games use generated levels');
   assert.equal(initialSave?.layout?.version, 3, 'Browser uses procedural board geometry');
   assert.equal(initialSave.layout.wells.length, 12, 'Generated layout includes every touch target');
@@ -112,9 +114,18 @@ const assert = require('node:assert/strict');
     await page.waitForTimeout(1200);
   }
   let progress = await readSave();
-  for (let step = 0; step < 12 && progress.unlocked < 2; step++) {
-    await touchMove(sortingMove(progress.board), progress.layout);
-    progress = await readSave();
+  if (progress.unlocked < 2) {
+    const localGodot = '/Users/siamak/Downloads/Godot.app/Contents/MacOS/Godot';
+    const godot = process.env.GODOT || (existsSync(localGodot) ? localGodot : 'godot');
+    const output = execFileSync(godot, ['--headless', '--path', '.', '--script', 'tests/web_route.gd', '--', JSON.stringify(progress.board)], { encoding: 'utf8', timeout: 60000 });
+    const routeLine = output.split('\n').find(line => line.startsWith('WEB_ROUTE:'));
+    assert.ok(routeLine, 'The real saved puzzle has a solution route');
+    const route = JSON.parse(routeLine.slice('WEB_ROUTE:'.length));
+    assert.ok(route.length > 0, 'The real saved puzzle is solvable');
+    for (const move of route) {
+      await touchMove(move, progress.layout);
+      progress = await readSave();
+    }
   }
   assert.equal(progress.unlocked, 2, 'Tutorial completion unlocks the next generated board');
   const modalTop = (virtualHeight - 510 * uiScale) / 2;

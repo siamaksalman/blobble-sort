@@ -12,12 +12,30 @@ func check(condition: bool, description: String) -> void:
 		push_error(description)
 
 func _initialize() -> void:
+	# No empty pockets and no solution using only matching-color transfers.
+	var mixed_start: Array = [[0, 0, 1], [0, 1, 1], [0, 1]]
+	var mixed_route: Array[Vector2i] = Solver.new().solve(mixed_start, 4000)
+	check(not mixed_route.is_empty(), "Solver can escape a board requiring a cross-color move")
+	var mixed_state: Array = mixed_start.duplicate(true)
+	var used_cross_color: bool = false
+	for move: Vector2i in mixed_route:
+		used_cross_color = used_cross_color or (not mixed_state[move.y].is_empty() and mixed_state[move.x].back() != mixed_state[move.y].back())
+		check(Puzzle.apply_to(mixed_state, move.x, move.y) > 0, "Cross-color solution uses legal moves")
+	check(used_cross_color and Puzzle.solved(mixed_state), "Cross-color solution reaches a sorted board")
 	var puzzle: BlobblePuzzle = Puzzle.new()
+	for color: int in Puzzle.COLOR_COUNT:
+		for destination_color: int in Puzzle.COLOR_COUNT:
+			var bottom_color: int = (color + 1) % Puzzle.COLOR_COUNT
+			puzzle.setup([[bottom_color, color, color], [destination_color], [], [], [], [], [], [], [], [], [], []])
+			check(puzzle.pour(0, 1) == 2, "Every top color can move onto every destination color")
+			check(puzzle.pockets[0] == [bottom_color] and puzzle.pockets[1] == [destination_color, color, color], "Only the top group moves and destination colors are preserved")
+			check(puzzle.moves == 1 and puzzle.undo() and puzzle.pockets == puzzle.initial, "Undo restores a move onto any color")
 	puzzle.setup([[1, 1], [2], [], [1, 1, 1], [], [], [], [], [], [], [], []])
-	check(puzzle.pour(0, 1) == 0, "Different top colors cannot mix")
+	check(puzzle.pour(2, 1) == 0, "Empty sources cannot move")
 	check(puzzle.moves == 0 and puzzle.history.is_empty(), "Invalid moves never mutate history")
 	check(puzzle.pour(0, 3) == 1, "Transfer is limited by destination capacity")
 	check(puzzle.pockets[0] == [1] and Puzzle.is_complete(puzzle.pockets[3]), "Partial group transfer preserves color")
+	check(puzzle.pour(1, 3) == 0, "Full pockets reject every color")
 	check(puzzle.undo() and puzzle.pockets == puzzle.initial, "Undo restores the exact board")
 	check(puzzle.moves == 0, "Undo restores the move count")
 	check(puzzle.pour(0, 2) == 2, "Contiguous group moves to an empty pocket")
@@ -25,6 +43,7 @@ func _initialize() -> void:
 	check(Puzzle.transfer_size(puzzle.pockets, -1, 2) == 0, "Invalid index rejected")
 	puzzle.restart()
 	check(puzzle.pockets == puzzle.initial and puzzle.history.is_empty(), "Restart clears history")
+	check(Puzzle.transfer_size([[0, 0, 0, 0], [1, 2, 3]], 0, 1) == 1, "Completed groups can move onto another color up to available capacity")
 	check(not Puzzle.valid_layout([[0]]), "Invalid pocket count rejected")
 	var bad: Array = puzzle.initial.duplicate(true)
 	bad[0] = [7]

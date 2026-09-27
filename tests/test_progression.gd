@@ -48,6 +48,13 @@ func _initialize() -> void:
 	check(Puzzle.state_key(restored.saved_board) == Puzzle.state_key(puzzle.pockets), "Generated board survives reload")
 	check(restored.saved_history.size() == 1 and Puzzle.state_key(restored.saved_history[0]) == Puzzle.state_key(puzzle.history[0]), "Generated undo history survives reload")
 	check(generator.generate(restored.level, restored.get("campaign_seed"))["pockets"] == puzzle.initial, "Restart after reload reproduces the exact initial puzzle")
+	var old_generated: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(PATH))
+	old_generated["generator_version"] = 2
+	old_generated["best"] = {"3": 22}
+	_write(old_generated)
+	restored.read_save()
+	check(restored.saved_board.is_empty() and restored.saved_history.is_empty() and restored.saved_moves == 0, "The old difficulty campaign starts a fresh board without stale undo history")
+	check(restored.level == 104 and restored.unlocked == 106 and restored.campaign_seed == 54321 and int(restored.best["3"]) == 22, "Difficulty migration retains campaign progress and records")
 	var legacy_levels: Array = JSON.parse_string(FileAccess.get_file_as_string("res://assets/levels.json"))
 	var legacy: Dictionary = {"version": 1, "level": 7, "unlocked": 12, "board": legacy_levels[7]["pockets"], "moves": 0, "history": [], "sound": false, "symbols": true, "best": {"3": 22}}
 	_write(legacy)
@@ -61,6 +68,39 @@ func _initialize() -> void:
 	again.path = PATH
 	again.call("read_save")
 	check(again.get("legacy_level") == true and again.saved_board == legacy["board"], "Migrated legacy puzzle remains identifiable on subsequent reloads")
+	_check_small_early_board(generator)
+	call_deferred("_check_progress_label")
+
+## Early levels hold fewer blobs; saving and the progress count must follow the level, not a full board.
+func _check_small_early_board(generator: RefCounted) -> void:
+	var early: Dictionary = generator.generate(0, 54321)
+	var small: BlobblePuzzle = Puzzle.new()
+	small.setup(early["pockets"])
+	var first_move: Array = early["solution"][0]
+	small.pour(first_move[0], first_move[1])
+	var store: BlobbleSaveStore = Store.new()
+	store.path = PATH
+	store.set("campaign_seed", 54321)
+	store.level = 0
+	store.legacy_level = false
+	store.write_save(small)
+	var reloaded: BlobbleSaveStore = Store.new()
+	reloaded.path = PATH
+	reloaded.call("read_save")
+	check(Puzzle.state_key(reloaded.saved_board) == Puzzle.state_key(small.pockets), "A smaller early-level board survives reload")
+	check(reloaded.saved_history.size() == 1, "A smaller early-level undo history survives reload")
+
+func _check_progress_label() -> void:
+	var game: Control = load("res://scripts/game.gd").new()
+	game.test_mode = true
+	root.add_child(game)
+	await process_frame
+	var groups: int = 0
+	for pocket: Array in game.puzzle.pockets:
+		groups += pocket.size()
+	groups /= Puzzle.CAPACITY
+	check(game._progress_label.text == "0 / %d together" % groups, "Progress counts this level's color groups (%s)" % game._progress_label.text)
+	game.queue_free()
 	_finish()
 
 func _write(data: Dictionary) -> void:

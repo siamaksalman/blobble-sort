@@ -26,6 +26,7 @@ func _initialize() -> void:
 	puzzle.setup(levels[0]["pockets"])
 	var move: Array = levels[0]["solution"][0]
 	puzzle.pour(int(move[0]), int(move[1]))
+	store.legacy_level = true  # The fixture board comes from the legacy JSON catalog.
 	store.sound = false
 	store.symbols = true
 	store.unlocked = 3

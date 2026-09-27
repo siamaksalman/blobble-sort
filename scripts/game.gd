@@ -102,7 +102,7 @@ func _create_interface() -> void:
 	_footer = Control.new()
 	_footer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_footer)
-	_message = _label("Tap a jelly, then a matching or empty pocket", 23, MUTED, HORIZONTAL_ALIGNMENT_CENTER)
+	_message = _label("Tap a top jelly, then any pocket with space", 23, MUTED, HORIZONTAL_ALIGNMENT_CENTER)
 	_message.size = Vector2(760, 40)
 	_footer.add_child(_message)
 	_undo_button = _button("Undo", Vector2(60, 57), Vector2(197, 70), _undo)
@@ -183,7 +183,7 @@ func _load_level(index: int, restore: bool = false) -> void:
 func _update_status() -> void:
 	_level_button.text = "LEVEL %02d  ···" % (save.level + 1)
 	_moves_label.text = "%d %s" % [puzzle.moves, "move" if puzzle.moves == 1 else "moves"]
-	_progress_label.text = "%d / 10 together" % puzzle.completed_count()
+	_progress_label.text = "%d / %d together" % [puzzle.completed_count(), _group_count()]
 	_difficulty_label.text = "%s · NO TIMER. NO RUSH." % str(current_level["difficulty"]["name"]).to_upper()
 	_undo_button.disabled = puzzle.history.is_empty()
 	_sound_button.icon = preload("res://assets/ui/sound.svg") if save.sound else preload("res://assets/ui/muted.svg")
@@ -220,6 +220,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		if event.pressed:
 			_press_pocket = board.hit_test(event.position)
 			_press_position = event.position
+			board.poke_at(event.position)
 		else:
 			var target: int = board.hit_test(event.position)
 			if _press_pocket >= 0 and target >= 0:
@@ -258,14 +259,14 @@ func _activate_pocket(index: int) -> void:
 		_animate_pour(_selected, index, amount)
 	else:
 		_play("invalid")
-		_toast("Find the same color on top, or an empty pocket")
+		_toast("Choose a pocket with space")
 		if not puzzle.pockets[index].is_empty():
 			_select(index, true)
 
 func _animate_pour(source: int, target: int, amount: int) -> void:
 	_busy = true
 	var old_complete: int = puzzle.completed_count()
-	var merging: bool = not puzzle.pockets[target].is_empty()
+	var merging: bool = not puzzle.pockets[target].is_empty() and puzzle.pockets[source].back() == puzzle.pockets[target].back()
 	_select(-1)
 	puzzle.pour(source, target)
 	_play("pour")
@@ -330,7 +331,7 @@ func _show_help() -> void:
 	if _busy:
 		return
 	_dialog("Hello, little jellies.", "A soft sorting puzzle, at your own pace.", 680)
-	var instructions: Label = _label("1   Tap the top jelly in any pocket.\n\n2   Tap a pocket with the same color on top,\n      or an empty one. You can drag, too.\n\n3   Bring four of a color together. They merge\n      into one happy jelly. Sort all ten to finish.", 23, INK)
+	var instructions: Label = _label("1   Tap the top jelly in any pocket.\n\n2   Tap any pocket with space, whatever its\n      color. You can drag, too.\n\n3   Bring four of a color together. They merge\n      into one happy jelly. Sort them all to finish.", 23, INK)
 	instructions.position = Vector2(44, 167)
 	instructions.size = Vector2(480, 272)
 	_modal_panel.add_child(instructions)
@@ -484,7 +485,14 @@ func _toast(text: String) -> void:
 	_message.text = text
 	await get_tree().create_timer(3.4).timeout
 	if id == _toast_id:
-		_message.text = "Tap a jelly, then a matching or empty pocket"
+		_message.text = "Tap a top jelly, then any pocket with space"
+
+## Color groups on this board: every four blobs of a color make one finished jelly.
+func _group_count() -> int:
+	var blobs: int = 0
+	for pocket: Array in puzzle.pockets:
+		blobs += pocket.size()
+	return blobs / Puzzle.CAPACITY
 
 func _play(sound: String, pitch: float = 1.0) -> void:
 	if save.sound:

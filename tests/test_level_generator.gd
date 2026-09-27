@@ -31,22 +31,45 @@ func _initialize() -> void:
 		_finish()
 		return
 	var generator: RefCounted = load("res://scripts/level_generator.gd").new()
+	check(generator.has_method("measure_difficulty"), "Difficulty is measured from a board under the current movement rules")
+	if not generator.has_method("measure_difficulty"):
+		_finish()
+		return
+	var open: Dictionary = generator.measure_difficulty([[0], [1], [2]], [])
+	check(open["legal_moves"] == 6 and open["cross_color_moves"] == 6, "Every different-colored destination with room contributes to mobility")
+	var compact: Array = [[0, 0, 1], [0, 1, 1], [0, 1]]
+	var route: Array = [[0, 1], [0, 2], [1, 0], [2, 1], [2, 0], [1, 2]]
+	var crowded: Dictionary = generator.measure_difficulty(compact, route)
+	var roomy: Array = compact.duplicate(true)
+	roomy.append([])
+	check(generator.measure_difficulty(roomy, route)["score"] < crowded["score"], "Extra buffer space lowers estimated difficulty for the same sorting task")
+	check(generator.measure_difficulty([[0, 0, 0, 0], []], [])["score"] == 0, "A solved board has no remaining difficulty")
+	check(generator.difficulty(40)["target_score"] > generator.difficulty(20)["target_score"], "Later levels target more measured difficulty after the board reaches full size")
 	var previous_pairs: int = 1000
+	var previous_groups: int = 0
 	var slowest: int = 0
 	for index: int in 80:
 		var started: int = Time.get_ticks_msec()
 		var generated: Dictionary = generator.generate(index, 14921)
 		slowest = maxi(slowest, Time.get_ticks_msec() - started)
 		var profile: Dictionary = generated["difficulty"]
+		var measured: Dictionary = generator.measure_difficulty(generated["pockets"], generated["solution"])
+		check(profile["score"] == measured["score"] and profile["name"] == measured["name"], "Displayed difficulty describes the actual generated board %d" % index)
 		check(profile["colors"] == 6, "Every color is in play from the first level (%d)" % (index + 1))
 		check(profile["pairs"] <= previous_pairs, "Allowed equal neighbors never increase at level %d" % (index + 1))
 		previous_pairs = profile["pairs"]
+		check(profile["groups"] >= previous_groups, "Boards never get emptier as levels advance (%d)" % (index + 1))
+		previous_groups = profile["groups"]
 		_verify(generated, index)
 		check(generated == generator.generate(index, 14921), "Level and campaign seed reproduce the same puzzle %d" % index)
 	check(slowest < 1500, "Dealing and certifying a level is quick enough for level loads (%d ms)" % slowest)
 	var first: Dictionary = generator.generate(0, 14921)
 	check(first["difficulty"]["pairs"] >= 2 and pairs(first["pockets"]) >= 2, "Early levels are eased by a few equal neighbors")
 	check(generator.generate(12, 14921)["difficulty"]["pairs"] == 0, "Later levels have no equal neighbors at all")
+	check(Puzzle.inventory(first["pockets"]) == [4, 4, 4, 4, 4, 4], "The first level has one group of each color, leaving plenty of room")
+	check(generator.generate(12, 14921)["difficulty"]["groups"] == 10, "The board is full by level 13")
+	check(_effort(generator, [0, 1, 2]) * 2 < _effort(generator, [30, 31, 32]), "Early levels are measurably easier with unrestricted color moves")
+	check(_effort(generator, [12, 13, 14]) < _effort(generator, [50, 51, 52]), "Measured difficulty continues growing after blob counts and equal neighbors stop changing")
 	var variations: Dictionary = {}
 	for seed_value: int in [1, 2, 3, 17, 999, 54321]:
 		for index: int in [0, 8, 16, 24, 32, 39, 100, 9999]:
@@ -63,7 +86,9 @@ func _initialize() -> void:
 func _verify(generated: Dictionary, index: int) -> void:
 	var state: Array = generated["pockets"].duplicate(true)
 	check(Puzzle.valid_layout(state), "Generated board has twelve valid pockets at %d" % index)
-	check(Puzzle.inventory(state) == [4, 8, 8, 8, 8, 4], "Generated board preserves balanced color counts at %d" % index)
+	var inventory: Array[int] = Puzzle.inventory(state)
+	check(inventory.all(func(count: int) -> bool: return count > 0 and count % Puzzle.CAPACITY == 0), "Every color is present in complete groups at %d" % index)
+	check(inventory.reduce(func(total: int, count: int) -> int: return total + count, 0) == generated["difficulty"]["groups"] * Puzzle.CAPACITY, "Blob count matches the level's group count at %d" % index)
 	check(not Puzzle.solved(state), "Generated level starts unsolved at %d" % index)
 	check(pairs(state) == generated["difficulty"]["pairs"], "Equal neighbors match the level's allowance at %d" % index)
 	for pocket: Array in state:
@@ -79,6 +104,16 @@ func _verify(generated: Dictionary, index: int) -> void:
 	solver.register_level(generated["pockets"], generated["solution"])
 	var hint: Vector2i = solver.get_hint(generated["pockets"])
 	check(Puzzle.transfer_size(generated["pockets"], hint.x, hint.y) > 0, "Generated certificate supports the hint system")
+
+## Average board difficulty under the current movement rules across a few campaigns.
+func _effort(generator: RefCounted, levels: Array) -> float:
+	var total: int = 0
+	var runs: int = 0
+	for index: int in levels:
+		for seed_value: int in [1, 2, 3, 4]:
+			total += int(generator.generate(index, seed_value)["difficulty"]["score"])
+			runs += 1
+	return total / float(runs)
 
 func _finish() -> void:
 	print("Generator checks: %d passed, %d failed" % [checks - failures, failures])
