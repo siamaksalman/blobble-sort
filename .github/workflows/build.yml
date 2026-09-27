@@ -16,10 +16,10 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - run: pip install numpy
@@ -35,7 +35,7 @@ jobs:
 
   export:
     needs: test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -46,7 +46,7 @@ jobs:
           - { preset: macOS, target: macos, output: builds/desktop/Blobble-macOS.zip, artifact: blobble-macos }
           - { preset: Android, target: android, output: builds/android/Blobble.apk, artifact: blobble-android }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: godot
         uses: ./.github/actions/setup-godot
         with:
@@ -79,7 +79,7 @@ jobs:
           test -e "${{ matrix.output }}"
           ls -la "${{ matrix.output }}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.output }}
@@ -88,11 +88,11 @@ jobs:
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: export
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
       - name: Package

@@ -18,7 +18,7 @@ runs:
       shell: bash
       run: echo "godot=$HOME/godot/Godot_v${{ inputs.version }}-stable_linux.x86_64" >> "$GITHUB_OUTPUT"
 
-    - uses: actions/cache@v4
+    - uses: actions/cache@v6
       with:
         path: ~/godot
         key: godot-${{ inputs.version }}-templates-${{ inputs.templates }}
