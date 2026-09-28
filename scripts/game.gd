@@ -12,6 +12,7 @@ const FONT: Font = preload("res://assets/fonts/interface.tres")
 const INK: Color = Color("665343")
 const MUTED: Color = Color("947b63")
 const SoundBank = preload("res://scripts/sound_bank.gd")
+const Splash = preload("res://scripts/studio_splash.gd")
 
 var puzzle: BlobblePuzzle = Puzzle.new()
 var solver: BlobbleHintSolver = Solver.new()
@@ -58,6 +59,8 @@ func _ready() -> void:
 	resized.connect(_layout)
 	_layout()
 	_load_level(save.level, true)
+	if not test_mode:
+		add_child(Splash.new())
 	if OS.get_cmdline_user_args().has("--show-help"):
 		_show_help()
 

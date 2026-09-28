@@ -15,7 +15,9 @@ test:
 	"$(GODOT)" --headless --path . --script tests/test_level_generator.gd
 	"$(GODOT)" --headless --path . --script tests/test_board_layout.gd
 	"$(GODOT)" --headless --path . --script tests/test_progression.gd
+	"$(GODOT)" --headless --path . --script tests/test_studio_splash.gd
 playtest:
+	"$(GODOT)" --path . --rendering-method gl_compatibility --script tests/test_eye_animation.gd
 	"$(GODOT)" --path . --rendering-method gl_compatibility --script tests/playtest.gd
 test-art:
 	"$(GODOT)" --path . --rendering-method gl_compatibility --script tests/test_reference_render.gd
