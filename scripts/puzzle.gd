@@ -94,7 +94,7 @@ static func state_key(state: Array, canonical: bool = false) -> String:
 	return "|".join(parts)
 
 static func valid_layout(state: Variant) -> bool:
-	if not state is Array or state.size() != POCKET_COUNT:
+	if not state is Array or state.size() < 6 or state.size() > POCKET_COUNT:
 		return false
 	for pocket: Variant in state:
 		if not pocket is Array or pocket.size() > CAPACITY:

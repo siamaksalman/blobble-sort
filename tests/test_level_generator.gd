@@ -31,7 +31,18 @@ func _initialize() -> void:
 		_finish()
 		return
 	var generator: RefCounted = load("res://scripts/level_generator.gd").new()
-	_check_gentle_opening(generator)
+	for index: int in [0, 1, 2, 3, 4, 5, 6, 8, 16, 100]:
+		var level: Dictionary = generator.generate(index)
+		var expected_pockets: int = mini(12, 6 + (index / 2) * 2)
+		if index == 0:
+			check(not _can_finish_in_two(level["pockets"]), "The opening requires more than two obvious matches")
+		check(level["pockets"].size() == expected_pockets, "Level %d grows the playable grid with its color count" % (index + 1))
+		check(level["layout"]["wells"].size() == expected_pockets, "Visible holes match the playable grid at level %d" % (index + 1))
+		check(level["pockets"].filter(func(pocket: Array) -> bool: return pocket.is_empty()).size() >= 2, "Every grid keeps at least two sorting buffers")
+	if failures:
+		_finish()
+		return
+	_check_opening_progression(generator)
 	if failures:
 		_finish()
 		return
@@ -59,7 +70,7 @@ func _initialize() -> void:
 		var profile: Dictionary = generated["difficulty"]
 		var measured: Dictionary = generator.measure_difficulty(generated["pockets"], generated["solution"])
 		check(profile["score"] == measured["score"] and profile["name"] == measured["name"], "Displayed difficulty describes the actual generated board %d" % index)
-		check(profile["colors"] == mini(6, 2 + index / 3), "One new color is introduced every three levels (%d)" % (index + 1))
+		check(profile["colors"] == mini(6, 2 + index / 2), "One new color is introduced every two levels (%d)" % (index + 1))
 		check(profile["pairs"] <= previous_pairs, "Allowed equal neighbors never increase at level %d" % (index + 1))
 		previous_pairs = profile["pairs"]
 		check(profile["groups"] >= previous_groups, "Boards never get emptier as levels advance (%d)" % (index + 1))
@@ -71,8 +82,8 @@ func _initialize() -> void:
 	check(first["difficulty"]["pairs"] >= 2 and pairs(first["pockets"]) >= 2, "Early levels are eased by a few equal neighbors")
 	check(generator.generate(12, 14921)["difficulty"]["pairs"] == 0, "Later levels have no equal neighbors at all")
 	check(first["difficulty"]["groups"] == 2, "The first level has only two groups to assemble")
-	check(generator.generate(12, 14921)["difficulty"]["groups"] == 6, "Level 13 introduces the sixth color before adding crowding")
-	check(generator.generate(24, 14921)["difficulty"]["groups"] == 10, "The board reaches full size at level 25")
+	check(generator.generate(8, 14921)["difficulty"]["groups"] == 6, "Level 9 introduces the sixth color before adding crowding")
+	check(generator.generate(16, 14921)["difficulty"]["groups"] == 10, "The board reaches full occupancy at level 17")
 	check(_effort(generator, [0, 1, 2]) * 2 < _effort(generator, [30, 31, 32]), "Early levels are measurably easier with unrestricted color moves")
 	check(_effort(generator, [24, 25, 26]) < _effort(generator, [50, 51, 52]), "Measured difficulty continues growing after blob counts and equal neighbors stop changing")
 	var variations: Dictionary = {}
@@ -90,7 +101,7 @@ func _initialize() -> void:
 
 func _verify(generated: Dictionary, index: int) -> void:
 	var state: Array = generated["pockets"].duplicate(true)
-	check(Puzzle.valid_layout(state), "Generated board has twelve valid pockets at %d" % index)
+	check(Puzzle.valid_layout(state), "Generated board has valid pockets at %d" % index)
 	var inventory: Array[int] = Puzzle.inventory(state)
 	check(inventory.all(func(count: int) -> bool: return count % Puzzle.CAPACITY == 0), "Present colors come in complete groups at %d" % index)
 	check(inventory.filter(func(count: int) -> bool: return count > 0).size() == generated["difficulty"]["colors"], "Actual color count matches the difficulty profile at %d" % index)
@@ -111,25 +122,38 @@ func _verify(generated: Dictionary, index: int) -> void:
 	var hint: Vector2i = solver.get_hint(generated["pockets"])
 	check(Puzzle.transfer_size(generated["pockets"], hint.x, hint.y) > 0, "Generated certificate supports the hint system")
 
-## Beginner boards must be simple to read and complete, across campaign seeds.
-func _check_gentle_opening(generator: RefCounted) -> void:
+## Keep the opening readable, but remove the two-move win and advance sooner.
+func _check_opening_progression(generator: RefCounted) -> void:
 	for seed_value: int in [14921, 1, 17, 999, 54321]:
-		for index: int in 3:
+		for index: int in 2:
 			var level: Dictionary = generator.generate(index, seed_value)
 			var inventory: Array[int] = Puzzle.inventory(level["pockets"])
-			check(inventory.filter(func(count: int) -> bool: return count > 0).size() == 2, "The first three levels teach sorting with only two colors")
-			check(level["pockets"].filter(func(pocket: Array) -> bool: return not pocket.is_empty()).size() == 4, "The opening keeps attention on just four occupied pockets")
-			check(level["solution"].size() <= (2 if index == 0 else 5), "Opening level %d has a short, approachable solution" % (index + 1))
-			if index == 0:
-				var state: Array = level["pockets"].duplicate(true)
-				for move: Array in level["solution"]:
-					check(not state[move[1]].is_empty() and state[move[0]].back() == state[move[1]].back(), "First-level moves visibly match the same color")
-					Puzzle.apply_to(state, move[0], move[1])
+			check(inventory.filter(func(count: int) -> bool: return count > 0).size() == 2, "The first two levels introduce sorting with two colors")
+			check(level["pockets"].filter(func(pocket: Array) -> bool: return not pocket.is_empty()).size() == 4, "The opening keeps attention on four occupied pockets")
+			check(not _can_finish_in_two(level["pockets"]), "Early puzzles need more than two moves across campaign seeds")
+			check(level["solution"].size() <= 8, "The opening remains approachable with a solution of at most eight moves")
+			check(pairs(level["pockets"]) == (2 if index == 0 else 0), "Pre-matched pairs are removed after the first level")
 	var previous: float = -1.0
-	for band: Array in [[0, 1, 2], [3, 4, 5], [6, 7, 8], [9, 10, 11], [12, 13, 14], [18, 19, 20], [24, 25, 26]]:
+	for band: Array in [[0, 1], [2, 3], [4, 5], [6, 7], [8, 9], [12, 13], [16, 17]]:
 		var effort: float = _effort(generator, band)
 		check(effort > previous, "Solving effort increases across each introduction and crowding stage")
 		previous = effort
+
+## Exhaustively check shallow wins, rather than trusting certificate length.
+func _can_finish_in_two(state: Array, remaining: int = 2) -> bool:
+	if Puzzle.solved(state):
+		return true
+	if remaining == 0:
+		return false
+	for source: int in state.size():
+		for target: int in state.size():
+			if Puzzle.transfer_size(state, source, target) == 0:
+				continue
+			var next: Array = state.duplicate(true)
+			Puzzle.apply_to(next, source, target)
+			if _can_finish_in_two(next, remaining - 1):
+				return true
+	return false
 
 ## Average board difficulty under the current movement rules across a few campaigns.
 func _effort(generator: RefCounted, levels: Array) -> float:

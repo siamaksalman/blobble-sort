@@ -76,6 +76,15 @@ func apply_layout(layout: Dictionary) -> void:
 	_backdrop.texture = TEXTURE
 	_backdrop.material = _reference_material
 	_reference_material.set_shader_parameter("clay_art", TEXTURE)
+	_reference_material.set_shader_parameter("compact_count", layout_data.get("compact_count", 0))
+	if layout_data.has("compact_count"):
+		var offset: Array = layout_data["offset"]
+		_reference_material.set_shader_parameter("compact_offset", Vector2(offset[0], offset[1]))
+		_reference_material.set_shader_parameter("reference_layout", false)
+		_reference_material.set_shader_parameter("horizontal", PackedInt32Array(layout_data["horizontal"]))
+		_reference_material.set_shader_parameter("vertical", PackedInt32Array(layout_data["vertical"]))
+		queue_redraw()
+		return
 	for key: String in ["source_x", "target_x", "source_y", "target_y"]:
 		_reference_material.set_shader_parameter(key, PackedFloat32Array(layout_data[key]))
 	_reference_material.set_shader_parameter("mirror", layout_data["mirror"])
@@ -84,11 +93,14 @@ func apply_layout(layout: Dictionary) -> void:
 	_reference_material.set_shader_parameter("vertical", PackedInt32Array(layout_data["vertical"]))
 	queue_redraw()
 
+func _pocket_count() -> int:
+	return 12 if layout_data.is_empty() else layout_data["wells"].size()
+
 func directional_neighbor(index: int, direction: Vector2) -> int:
 	var origin: Vector2 = center_at(index, 1.5)
 	var result: int = index
 	var best: float = INF
-	for candidate: int in 12:
+	for candidate: int in _pocket_count():
 		var offset: Vector2 = center_at(candidate, 1.5) - origin
 		if offset.dot(direction) <= 20:
 			continue
@@ -100,7 +112,7 @@ func directional_neighbor(index: int, direction: Vector2) -> int:
 
 func hit_test(global_point: Vector2) -> int:
 	var local: Vector2 = get_global_transform().affine_inverse() * global_point
-	for i: int in 12:
+	for i: int in _pocket_count():
 		if pocket_rect(i).has_point(local):
 			return i
 	return -1
@@ -285,7 +297,7 @@ func set_selection(index: int, destination: int = -1) -> void:
 func _draw() -> void:
 	if pockets.is_empty():
 		return
-	for i: int in 12:
+	for i: int in _pocket_count():
 		var rect: Rect2 = pocket_rect(i).grow(-5) if layout_data.is_empty() else Layout.well_rect(layout_data, i).grow(3)
 		var color: Color = Color.TRANSPARENT
 		if i == selected:

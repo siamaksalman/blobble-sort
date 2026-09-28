@@ -65,6 +65,23 @@ func run() -> void:
 			if eye.r < 0.15 and eye.g < 0.15 and eye.b < 0.15:
 				black_pixels += 1
 	check(black_pixels >= 120, "Merged jellies retain open black eyes (%d dark pixels)" % black_pixels)
+	# Smaller grids must retain the photographed clay, including the cavity lighting.
+	board.refresh([])
+	for count: int in [6, 8, 10]:
+		var compact: Dictionary = Layout.new().generate(0, 14921, count)
+		board.apply_layout(compact)
+		await process_frame
+		await process_frame
+		RenderingServer.force_draw()
+		var small_render: Image = viewport.get_texture().get_image()
+		small_render.save_png("res://builds/reference-small-%02d.png" % count)
+		var original_clay: bool = true
+		for dy: float in [-170.0, -120.0, 0.0, 100.0, 180.0]:
+			var at: Vector2 = board.center_at(0, 1.5) + Vector2(0, dy)
+			var a: Color = small_render.get_pixelv(Vector2i(at.round()))
+			var b: Color = source.get_pixelv(Vector2i(Vector2(158, 344.5 + dy).round()))
+			original_clay = original_clay and Vector3(a.r - b.r, a.g - b.g, a.b - b.b).length() < 0.035
+		check(original_clay, "%d-hole grids retain the original photographed pocket texture and lighting" % count)
 	viewport.free()
 	print("Reference visual failures: ", failures)
 	quit(1 if failures else 0)

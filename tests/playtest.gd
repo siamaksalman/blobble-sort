@@ -107,7 +107,7 @@ func run() -> void:
 	await create_timer(0.5).timeout
 	await snapshot("layout-level-02")
 	# Keep a small visual gallery covering reference-preserving variations.
-	for index: int in [2, 3, 8, 17]:
+	for index: int in [2, 4, 6, 17]:
 		game._load_level(index)
 		await create_timer(0.4).timeout
 		await snapshot("layout-level-%02d" % (index + 1))

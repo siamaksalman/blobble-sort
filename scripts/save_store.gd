@@ -45,14 +45,15 @@ func read_save(legacy_levels: Array = []) -> void:
 		return
 	var board: Variant = data.get("board", [])
 	# Early generated levels hold fewer blobs, so validate against this level's own deal.
-	var expected: Array[int] = Puzzle.inventory(Generator.SOLVED) if legacy_level else Puzzle.inventory(Generator.new().generate(level, campaign_seed)["pockets"])
-	if Puzzle.valid_layout(board) and Puzzle.inventory(board) == expected:
+	var initial: Array = Generator.SOLVED if legacy_level else Generator.new().generate(level, campaign_seed)["pockets"]
+	var expected: Array[int] = Puzzle.inventory(initial)
+	if Puzzle.valid_layout(board) and board.size() == initial.size() and Puzzle.inventory(board) == expected:
 		saved_board = board
 		saved_moves = maxi(0, int(data.get("moves", 0)))
 		var raw_history: Variant = data.get("history", [])
 		if raw_history is Array:
 			for state: Variant in raw_history:
-				if Puzzle.valid_layout(state) and Puzzle.inventory(state) == expected:
+				if Puzzle.valid_layout(state) and state.size() == initial.size() and Puzzle.inventory(state) == expected:
 					saved_history.append(state)
 
 func write_save(puzzle: BlobblePuzzle) -> void:

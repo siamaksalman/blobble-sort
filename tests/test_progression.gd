@@ -89,6 +89,16 @@ func _check_small_early_board(generator: RefCounted) -> void:
 	reloaded.call("read_save")
 	check(Puzzle.state_key(reloaded.saved_board) == Puzzle.state_key(small.pockets), "A smaller early-level board survives reload")
 	check(reloaded.saved_history.size() == 1, "A smaller early-level undo history survives reload")
+	var malformed: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(PATH))
+	malformed["board"].append([])
+	_write(malformed)
+	reloaded.read_save()
+	check(reloaded.saved_board.is_empty(), "Saved boards cannot add extra holes to the current level")
+	malformed["board"] = small.pockets
+	malformed["history"][0].append([])
+	_write(malformed)
+	reloaded.read_save()
+	check(not reloaded.saved_board.is_empty() and reloaded.saved_history.is_empty(), "Undo history must match the current grid size")
 
 func _check_progress_label() -> void:
 	var game: Control = load("res://scripts/game.gd").new()

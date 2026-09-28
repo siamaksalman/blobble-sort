@@ -1,7 +1,7 @@
 class_name BlobbleBoardLayout
 extends RefCounted
-## Reference-derived layouts. Variation moves the original clay artwork and its
-## touch targets together, preserving the broad channels and full-size jellies.
+## Compact beginner trays and reference-derived full layouts, all with full-size
+## jellies and touch targets that follow the visible pockets.
 
 const VERSION: int = 3
 const SIZE: Vector2 = Vector2(941, 1672)
@@ -13,9 +13,11 @@ const SOURCE_Y: Array[float] = [0.0, 100.0, 530.0, 590.0, 1000.0, 1080.0, 1500.0
 # Openings traced from the reference texture, including its broad cross passages.
 const CONNECTIONS: Array = [[0, 1], [1, 2], [2, 3], [4, 5], [5, 6], [6, 7], [8, 9], [9, 10], [10, 11], [0, 4], [1, 5], [3, 7], [4, 8], [5, 9], [7, 11]]
 
-func generate(index: int, campaign_seed: int = 14921) -> Dictionary:
+func generate(index: int, campaign_seed: int = 14921, pocket_count: int = 12) -> Dictionary:
 	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
 	rng.seed = campaign_seed * 31 + maxi(index, 0) * 7919 + 42841
+	if pocket_count < 12:
+		return _compact_layout(pocket_count, rng)
 	var is_reference: bool = index == 0 and campaign_seed == 14921
 	var mirrored: bool = posmod(index, 2) == 1
 	var source_x: Array[float] = [0.0]
@@ -41,6 +43,30 @@ func generate(index: int, campaign_seed: int = 14921) -> Dictionary:
 	return {"version": VERSION, "size": [941, 1672], "rows": [4, 4, 4], "wells": wells, "corridors": maze["corridors"],
 		"reference": is_reference, "horizontal": maze["horizontal"], "vertical": maze["vertical"],
 		"mirror": mirrored, "source_x": source_x, "target_x": target_x, "source_y": SOURCE_Y.duplicate(), "target_y": target_y}
+
+## Splice out whole rows/columns of the reference, preserving its pocket scale.
+func _compact_layout(pocket_count: int, rng: RandomNumberGenerator) -> Dictionary:
+	var source_rows: Array = [[0, 2, 3], [8, 10, 11]] if pocket_count == 6 else [[0, 1, 2, 3], [8, 9, 10, 11]] if pocket_count == 8 else [[0, 2, 3], [4, 5, 6, 7], [8, 10, 11]]
+	var layout: Dictionary = {"version": VERSION, "size": [941, 1672], "compact_count": pocket_count,
+		"offset": [snappedf(rng.randf_range(-8.0, 8.0), 0.1), snappedf(rng.randf_range(-8.0, 8.0), 0.1)],
+		"rows": [], "wells": [], "corridors": [], "horizontal": [1, 1, 1, 1, 1, 1, 1, 1, 1],
+		"vertical": [1, 0, 1, 1, 1, 0, 1, 1]}
+	var previous_row: Dictionary = {}
+	for row: int in source_rows.size():
+		var current_row: Dictionary = {}
+		layout["rows"].append(source_rows[row].size())
+		for source_index: int in source_rows[row]:
+			var column: int = source_index % 4
+			var center: Vector2 = map_reference(layout, Vector2(COLUMNS[column], BOTTOMS[source_index / 4] - STEP * 1.5))
+			var index: int = layout["wells"].size()
+			layout["wells"].append({"center": [center.x, center.y], "scale": 1.0, "row": row})
+			if not current_row.is_empty():
+				layout["corridors"].append({"from": index - 1, "to": index})
+			if previous_row.has(column) and column != 1:
+				layout["corridors"].append({"from": previous_row[column], "to": index})
+			current_row[column] = index
+		previous_row = current_row
+	return layout
 
 func _generate_maze(rng: RandomNumberGenerator, is_reference: bool) -> Dictionary:
 	var candidates: Array = []
@@ -93,6 +119,16 @@ func _generate_maze(rng: RandomNumberGenerator, is_reference: bool) -> Dictionar
 
 ## Same forward mapping that the art shader reverses. Also useful for screenshots.
 static func map_reference(layout: Dictionary, point: Vector2) -> Vector2:
+	if layout.has("compact_count"):
+		var count: int = layout["compact_count"]
+		var cut_x: float = 206.0 if count == 6 else 0.0
+		if count == 10:
+			cut_x = 206.0 * (1.0 - smoothstep(530.0, 590.0, point.y) + smoothstep(1000.0, 1080.0, point.y))
+		var x: float = point.x + cut_x * 0.5 - (cut_x if point.x > 469.5 else 0.0)
+		var y: float = point.y
+		if count < 10:
+			y += 237.0 - (474.0 if point.y > 1034.0 else 0.0)
+		return Vector2(x + layout["offset"][0], y + layout["offset"][1])
 	var original: Vector2 = point
 	if layout["mirror"]:
 		original.x = SIZE.x - original.x

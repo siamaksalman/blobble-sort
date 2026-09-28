@@ -71,6 +71,24 @@ func run() -> void:
 		var expected: Vector2 = Vector2(reference_columns[i % 4], reference_bottoms[i / 4])
 		check(layout_generator.center_at(reference, i, 0).is_equal_approx(expected), "First level exactly preserves the original pocket coordinates")
 	var generator: RefCounted = Generator.new()
+	for index: int in [0, 2, 4]:
+		var compact: Dictionary = generator.generate(index)
+		var compact_board: Control = Board.new()
+		root.add_child(compact_board)
+		compact_board.apply_layout(compact["layout"])
+		compact_board.refresh(compact["pockets"])
+		compact_board.position = Vector2(31, 17)
+		compact_board.scale = Vector2.ONE * 0.47
+		for i: int in compact["pockets"].size():
+			var hit: Rect2 = layout_generator.hit_rect(compact["layout"], i)
+			check(Rect2(20, 40, 901, 1580).encloses(hit), "Smaller grids keep touch targets within the board")
+			for slot: int in 4:
+				check(compact_board.hit_test(compact_board.get_global_transform() * compact_board.center_at(i, slot)) == i, "Every smaller-grid slot is reachable by touch")
+			for direction: Vector2 in [Vector2.LEFT, Vector2.RIGHT, Vector2.UP, Vector2.DOWN]:
+				var neighbor: int = compact_board.directional_neighbor(i, direction)
+				check(neighbor >= 0 and neighbor < compact["pockets"].size(), "Keyboard focus stays within the smaller grid")
+		check(compact_board.hit_test(compact_board.get_global_transform() * Vector2(470, 50)) == -1, "Blank clay does not accept moves")
+		compact_board.free()
 	var level: Dictionary = generator.generate(9)
 	check(level.has("layout"), "Generated levels include their board layout")
 	if not level.has("layout"):

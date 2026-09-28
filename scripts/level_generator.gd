@@ -7,13 +7,13 @@ extends RefCounted
 const Puzzle = preload("res://scripts/puzzle.gd")
 const Layout = preload("res://scripts/board_layout.gd")
 const Solver = preload("res://scripts/hint_solver.gd")
-const VERSION: int = 4
+const VERSION: int = 6
 const DEFAULT_SEED: int = 14921
-## First teach two obvious matches, then gradually separate equal neighbors.
-const OPENING_PAIRS: Array[int] = [4, 2, 2, 2, 1, 1, 1]
-## Color groups (four blobs each) on the first level, growing by one every three levels.
+## Give the first board two matching pairs, then require sorting every stack.
+const OPENING_PAIRS: Array[int] = [2]
+## Color groups (four blobs each) on the first level, growing by one every two levels.
 const OPENING_GROUPS: int = 2
-const OPENING_MOVE_LIMIT: int = 5
+const OPENING_MOVE_LIMIT: int = 8
 const MAX_PER_POCKET: int = 2
 const SEARCH_BUDGET: int = 4000
 const CANDIDATES: int = 4
@@ -25,9 +25,11 @@ const GROUP_COLORS: Array[int] = [0, 2, 1, 5, 3, 4, 1, 4, 3, 2]
 func difficulty(index: int) -> Dictionary:
 	index = maxi(index, 0)
 	var allowed: int = OPENING_PAIRS[index] if index < OPENING_PAIRS.size() else 0
-	var groups: int = mini(GROUP_COLORS.size(), OPENING_GROUPS + index / 3)
-	var target_score: int = 6 + mini(index, 12) * 6 + clampi(index - 12, 0, 12) * 10 + clampi(index - 24, 0, 30) * 2
-	return {"colors": mini(groups, Puzzle.COLOR_COUNT), "groups": groups, "pairs": allowed, "target_score": target_score}
+	var groups: int = mini(GROUP_COLORS.size(), OPENING_GROUPS + index / 2)
+	# Advance the existing difficulty curve at the same pace as color introductions.
+	var progression: int = index * 3 / 2
+	var target_score: int = 12 + mini(progression, 12) * 6 + clampi(progression - 12, 0, 12) * 10 + clampi(progression - 24, 0, 30) * 2
+	return {"colors": mini(groups, Puzzle.COLOR_COUNT), "groups": groups, "pockets": mini(12, groups * 2 + 2), "pairs": allowed, "target_score": target_score}
 
 ## A deterministic estimate, not an optimal move count or a human difficulty rating.
 ## Count all legal destinations, including different colors, and discount spare room.
@@ -87,7 +89,7 @@ func generate(index: int, campaign_seed: int = DEFAULT_SEED) -> Dictionary:
 	assert(not level.is_empty(), "A certified deal is found within the attempt budget")
 	level["index"] = index
 	level["generator_version"] = VERSION
-	level["layout"] = Layout.new().generate(index, campaign_seed)
+	level["layout"] = Layout.new().generate(index, campaign_seed, level["pockets"].size())
 	return level
 
 ## One spread-out deal with exactly the allowed equal neighbors, if the solver can finish it.
@@ -97,11 +99,12 @@ func _deal(profile: Dictionary, rng: RandomNumberGenerator) -> Dictionary:
 		for i: int in Puzzle.CAPACITY:
 			blobs.append(GROUP_COLORS[group])
 	var filled: Array[int] = []
-	for index: int in SOLVED.size():
-		if not SOLVED[index].is_empty():
+	var pocket_count: int = int(profile["pockets"])
+	for index: int in pocket_count:
+		if pocket_count < SOLVED.size() or not SOLVED[index].is_empty():
 			filled.append(index)
 	# Small introductions use two pockets per group; later boards occupy ten pockets.
-	filled.resize(mini(filled.size(), int(profile["groups"]) * 2))
+	filled.resize(mini(pocket_count - 2, int(profile["groups"]) * 2))
 	# Spread the blobs evenly over the active pockets, keeping at least two empty.
 	var sizes: Array = []
 	for i: int in filled.size():
@@ -111,7 +114,7 @@ func _deal(profile: Dictionary, rng: RandomNumberGenerator) -> Dictionary:
 		_shuffle(blobs, rng)
 		_shuffle(sizes, rng)
 		state = []
-		for index: int in SOLVED.size():
+		for index: int in pocket_count:
 			state.append([])
 		var taken: int = 0
 		for i: int in filled.size():
