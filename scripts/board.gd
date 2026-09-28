@@ -27,6 +27,7 @@ var layout_data: Dictionary = {}
 var _backdrop: TextureRect
 var _reference_material: ShaderMaterial
 var _legacy_material: ShaderMaterial
+var _idle_time: float = 0.0
 
 func _ready() -> void:
 	# Update contact after each jelly has applied its own animation pose.
@@ -155,6 +156,7 @@ func refresh(state: Array, animate: bool = false) -> void:
 				amount += 1
 			var jelly: BlobbleJelly = Jelly.new()
 			jelly.configure(int(pocket[slot]), amount, show_symbols)
+			_continue_idle(jelly, index, slot)
 			jelly.pocket_index = index
 			jelly.start_slot = slot
 			jelly.layout_scale = pocket_scale(index)
@@ -187,6 +189,7 @@ func play_pour(source: int, target: int, amount: int, after: Array) -> void:
 	_pulse_supports(source, after[source].size(), -0.075)
 	flying = Jelly.new()
 	flying.configure(color, amount, show_symbols)
+	_continue_idle(flying, source, after[source].size())
 	flying.z_index = 1
 	pieces.add_child(flying)
 	var start: Vector2 = center_at(source, after[source].size() + (amount - 1) * 0.5)
@@ -239,6 +242,7 @@ func splash_count() -> int:
 	return _droplets.size()
 
 func _process(delta: float) -> void:
+	_idle_time += delta
 	_update_supports()
 	if _droplets.is_empty():
 		return
@@ -248,6 +252,10 @@ func _process(delta: float) -> void:
 		droplet[4] += delta
 	_droplets = _droplets.filter(func(droplet: Array) -> bool: return droplet[4] < droplet[5])
 	splash_layer.queue_redraw()
+
+func _continue_idle(jelly: BlobbleJelly, pocket: int, slot: int) -> void:
+	var personality: float = fposmod(float(pocket * 17 + slot * 7 + jelly.color_index * 13) * 1.618, 20.0)
+	jelly.set_idle_phase(_idle_time, personality)
 
 func _draw_droplets() -> void:
 	for droplet: Array in _droplets:

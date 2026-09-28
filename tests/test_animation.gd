@@ -33,6 +33,10 @@ func deformation(jelly: BlobbleJelly) -> float:
 func pinch(jelly: BlobbleJelly) -> float:
 	return float(jelly.material.get_shader_parameter("pinch"))
 
+func idle_time(jelly: BlobbleJelly) -> float:
+	var value: Variant = jelly.material.get_shader_parameter("clock")
+	return 0.0 if value == null else float(value)
+
 ## Starts a pour and follows the traveling jelly until it lands.
 func follow_pour(board: BlobbleBoard, source: int, target: int, amount: int, after: Array) -> Dictionary:
 	var start: int = Time.get_ticks_msec()
@@ -50,13 +54,52 @@ func follow_pour(board: BlobbleBoard, source: int, target: int, amount: int, aft
 	return result
 
 func run() -> void:
+	# The little comic jiggle stays seated, including on a tall merged jelly.
+	for amount: int in [1, 4]:
+		var playful: BlobbleJelly = preload("res://scripts/jelly.gd").new()
+		playful.configure(0, amount)
+		playful.pocket_index = 0
+		playful.origin = Vector2(50, 50)
+		var widest: float = 1.0
+		var narrowest: float = 1.0
+		var seated: bool = true
+		for frame: int in 41:
+			playful.set_idle_phase(16.5 + frame * 0.05, 0.0)
+			playful._process(0.0)
+			widest = maxf(widest, playful.scale.x)
+			narrowest = minf(narrowest, playful.scale.x)
+			var foot: Vector2 = playful.get_transform() * playful.pivot_offset
+			seated = seated and foot.is_equal_approx(playful.origin + playful.pivot_offset)
+		check(widest > 1.003 and narrowest < 0.997, "A happy jelly does a tiny squash-and-stretch jiggle")
+		check(widest < 1.04 and narrowest > 0.96 and seated, "The comic jiggle is small and stays seated")
+		playful.set_idle_phase(20.2, 0.0)
+		playful._process(0.0)
+		check(playful.scale.is_equal_approx(Vector2.ONE), "The happy jiggle ends in a quiet rest")
+		var moving_frames: int = 0
+		for frame: int in 1600:
+			playful.set_idle_phase(frame * 0.05, 0.0)
+			playful._process(0.0)
+			if absf(playful.scale.x - 1.0) > 0.001:
+				moving_frames += 1
+		check(moving_frames > 0 and moving_frames < 48, "Playful jiggles occupy less than three percent of idle time")
+		playful.free()
 	var board: BlobbleBoard = Board.new()
 	root.add_child(board)
 	await process_frame
 
 	board.refresh(layout([1, 2], [2]))
+	await create_timer(0.15).timeout
+	var idle_clock: float = idle_time(board.jelly_at(0, 0))
+	var personality: float = float(board.jelly_at(0, 0).material.get_shader_parameter("seed"))
+	board.refresh(layout([1, 2], [2]))
+	check(absf(idle_time(board.jelly_at(0, 0)) - idle_clock) < 0.05,
+		"Refreshing a board preserves expression progress")
+	check(is_equal_approx(float(board.jelly_at(0, 0).material.get_shader_parameter("seed")), personality),
+		"Refreshing a board preserves an untouched jelly's facial personality")
 	var resting_top: float = jellies_in(board, 0)[1].position.y
 	var flight: Dictionary = await follow_pour(board, 0, 1, 1, layout([1], [2, 2]))
+	check(idle_time(board.jelly_at(0, 0)) > idle_clock,
+		"A pour does not restart the expressions of resting jellies")
 	check(flight.seconds < 0.6, "A pour lands quickly enough to keep play snappy")
 	check(flight.highest < resting_top - 60.0, "The traveling jelly arcs up out of its pocket")
 	check(flight.stretch > 0.08, "The traveling jelly stretches and squashes in flight")

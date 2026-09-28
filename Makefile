@@ -20,6 +20,7 @@ playtest:
 	"$(GODOT)" --path . --rendering-method gl_compatibility --script tests/test_eye_animation.gd
 	"$(GODOT)" --path . --rendering-method gl_compatibility --script tests/playtest.gd
 test-art:
+	"$(GODOT)" --path . --rendering-method gl_compatibility --script tests/test_merged_surface.gd
 	"$(GODOT)" --path . --rendering-method gl_compatibility --script tests/test_reference_render.gd
 	"$(GODOT)" --path . --rendering-method gl_compatibility --script tests/test_maze_art.gd
 web:

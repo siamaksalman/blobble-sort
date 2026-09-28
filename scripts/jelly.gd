@@ -6,6 +6,9 @@ const REFERENCE: Texture2D = preload("res://assets/textures/reference_jellies.jp
 # Sprite bounds in the unmodified user reference; pixels are sampled directly.
 const SINGLE_RECTS: Array[Rect2] = [Rect2(314, 908, 109, 89), Rect2(217, 316, 101, 96), Rect2(728, 890, 112, 105), Rect2(623, 909, 99, 94), Rect2(514, 1371, 116, 107), Rect2(727, 1376, 114, 103)]
 const LONG_RECTS: Array[Rect2] = [Rect2(314, 908, 109, 89), Rect2(217, 316, 101, 96), Rect2(316, 162, 111, 365), Rect2(312, 1106, 114, 281), Rect2(313, 668, 113, 244), Rect2(728, 164, 116, 357)]
+# Eye centers in the source photograph, so facial motion stays off the body.
+const SINGLE_EYES: Array[Vector4] = [Vector4(363, 949, 384, 948), Vector4(268, 361, 287, 359), Vector4(782, 938, 801, 936), Vector4(678, 959, 697, 957), Vector4(577, 1420, 598, 1418), Vector4(787, 1424, 808, 1421)]
+const LONG_EYES: Array[Vector4] = [Vector4(363, 949, 384, 948), Vector4(268, 361, 287, 359), Vector4(354, 222, 376, 222), Vector4(356, 1164, 378, 1165), Vector4(359, 720, 380, 719), Vector4(786, 227, 809, 224)]
 const COLORS: Array[Color] = [Color("ff9d58"), Color("43baf1"), Color("ffe44c"), Color("f777b8"), Color("58dfa6"), Color("ae7bf0")]
 var pocket_index: int = -1
 var start_slot: int = 0
@@ -39,6 +42,7 @@ func configure(color: int, amount: int, show_symbols: bool = false) -> void:
 	shader_material.set_shader_parameter("reference_art", REFERENCE)
 	var region: Rect2 = SINGLE_RECTS[color] if count == 1 else LONG_RECTS[color]
 	shader_material.set_shader_parameter("source_rect", Vector4(region.position.x, region.position.y, region.size.x, region.size.y))
+	shader_material.set_shader_parameter("eye_centers", SINGLE_EYES[color] if count == 1 else LONG_EYES[color])
 	shader_material.set_shader_parameter("single", count == 1)
 	shader_material.set_shader_parameter("rect_size", size)
 	shader_material.set_shader_parameter("body_height", body_height)
@@ -48,6 +52,13 @@ func configure(color: int, amount: int, show_symbols: bool = false) -> void:
 	shader_material.set_shader_parameter("color_id", float(color))
 	shader_material.set_shader_parameter("pinch", 0.0)
 	material = shader_material
+
+## Recreated board pieces continue their idle animation instead of starting over.
+func set_idle_phase(seconds: float, personality_seed: float) -> void:
+	_age = seconds
+	_seed = personality_seed
+	material.set_shader_parameter("clock", _age)
+	material.set_shader_parameter("seed", _seed)
 
 func _process(delta: float) -> void:
 	_age += delta
@@ -60,7 +71,24 @@ func _process(delta: float) -> void:
 
 func _apply_pose() -> void:
 	position = origin + Vector2(0, support_offset + _lift * layout_scale)
-	scale = squash * _grow * layout_scale
+	scale = squash * _idle_jiggle() * _grow * layout_scale
+
+func _idle_jiggle() -> Vector2:
+	# Keep the happy/wink beat in step with the facial timeline in jelly.gdshader.
+	# Traveling or selected pieces already have their own larger movement.
+	if pocket_index < 0 or selected:
+		return Vector2.ONE
+	var period: float = 20.0 + fposmod(_seed * 0.29, 1.0) * 8.0
+	var clock: float = _age + fposmod(_seed * 0.53, 1.0) * 14.0
+	var mood: int = posmod(int(floor(clock / period)) + int(floor(_seed)), 5)
+	if mood != 0 and mood != 4:
+		return Vector2.ONE
+	var beat: float = (fposmod(clock, period) - (period - 3.2) - 0.4) / 1.2
+	if beat <= 0.0 or beat >= 1.0:
+		return Vector2.ONE
+	# Two elastic wiggles, bounded to a few pixels even on a tall merged body.
+	var squish: float = sin(beat * TAU * 2.0) * pow(sin(beat * PI), 2.0) * 0.035 / float(count)
+	return Vector2(1.0 + squish, 1.0 - squish)
 
 ## The top surface moves with inherited support, lift, and bottom-pivot squash.
 func top_displacement() -> float:
