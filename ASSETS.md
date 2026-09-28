@@ -6,7 +6,8 @@
 - `assets/fonts/Nunito.ttf`: Nunito variable font, downloaded from the Google Fonts repository. SIL Open Font License, included at `assets/fonts/OFL.txt`.
 - `assets/audio/*.wav`: eleven original effects synthesized from scratch (bubble chirps, filtered noise, bell partials, a light echo) by `tools/generate_content.py` (needs `numpy`). No samples or third-party audio. All pitched cues are tuned to C major (main notes on the C major pentatonic) so overlapping sounds harmonize; `tests/test_sound_harmony.py` verifies this.
 - `assets/brand/redcrow_studio.png`: user-supplied Redcrow Studio logo, cropped, downscaled to 720×632, with the white background keyed to transparent (the eye stays opaque). Shown by the opening studio splash (`scripts/studio_splash.gd`).
-- `assets/icon.svg`, `assets/ui/*.svg`, and the jelly shader: original project code/art.
+- `assets/icon.svg`, `assets/ui/*.svg`, and the jelly shader: original project code/art. The icon shows three stacked jellies in a clay well.
+- `assets/brand/blobble_logo.svg`: original wordmark. Letter outlines come from Nunito Black (wght 1000, OFL), converted to paths so no font is needed at runtime. The "o" is a jelly with a face.
 
 ## Board generation prompt
 
